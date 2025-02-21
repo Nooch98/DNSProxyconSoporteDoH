@@ -1,81 +1,97 @@
-from dnslib import DNSRecord, QTYPE
 import requests
 import socketserver
+import logging
 import time
+import configparser
+from dnslib import DNSRecord, QTYPE
 
-# Colores para terminal (solo si la terminal soporta ANSI)
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+# 🔹 Leer configuración desde el archivo .ini
+config = configparser.ConfigParser()
+config.read('config.ini')
 
-# Configuración del servidor DoH
-DOH_SERVER = "https://dns.google/dns-query"
+DOH_SERVERS = config['DNS']['Servers'].split(',')
+ALLOWED_QTYPES = config['DNS']['AllowedQtypes'].split(',')
+IP = config['Server']['IP']
+PORT = int(config['Server']['Port'])
+
+# 🔹 Configuración de logging
+logging.basicConfig(filename=config['Logging']['LogFile'], level=logging.INFO, 
+                    format="%(asctime)s - %(levelname)s - %(message)s")
+
+def log_info(message):
+    print(f"{COLOR['INFO']}{message}{COLOR['RESET']}")
+    logging.info(message)
+
+def log_error(message):
+    print(f"{COLOR['ERROR']}{message}{COLOR['RESET']}")
+    logging.error(message)
+
+# 🎨 Colores para la salida en terminal (para hacerla más legible)
+COLOR = {
+    "INFO": "\033[94m",  # Azul
+    "SUCCESS": "\033[92m",  # Verde
+    "WARNING": "\033[93m",  # Amarillo
+    "ERROR": "\033[91m",  # Rojo
+    "RESET": "\033[0m"  # Reset de color
+}
+
+def send_doh_request_with_retries(server, doh_query, headers, retries=3, delay=2):
+    """Función para intentar enviar la consulta DoH con reintentos."""
+    for attempt in range(retries):
+        try:
+            response = requests.post(server, data=doh_query, headers=headers, timeout=3)
+            if response.status_code == 200:
+                return response
+            else:
+                log_error(f"[⚠️ ERROR] {server} respondió {response.status_code} - {response.text}")
+        except requests.RequestException as e:
+            log_error(f"[⛔ ERROR] Intento {attempt+1} de {retries}: No se pudo conectar a {server}: {e}")
+        
+        if attempt < retries - 1:
+            time.sleep(delay)
+    return None
 
 class DNSProxy(socketserver.BaseRequestHandler):
     def handle(self):
         data, socket = self.request
         request = DNSRecord.parse(data)
 
-        # Convertir la consulta en formato DoH
         qname = str(request.q.qname)
-        qtype = QTYPE[request.q.qtype]
+        qtype = QTYPE.get(request.q.qtype, "UNKNOWN")
 
-        # Ignorar consultas de tipo PTR (que son típicas para direcciones como 127.0.0.1)
+        # 🛑 Ignorar PTR (evita consultas reversas de IPs locales)
         if qtype == 'PTR':
-            print(f"{bcolors.WARNING}[INFO] Consulta ignorada: tipo PTR no permitido{bcolors.ENDC}")
+            log_info(f"[IGNORADO] Consulta PTR para {qname}")
             return
 
-        # Solo permitir consultas de tipo A y AAAA (direcciones IPv4 e IPv6)
-        if qtype not in ['A', 'AAAA']:
-            print(f"{bcolors.WARNING}[INFO] Consulta ignorada: tipo {qtype} no permitido{bcolors.ENDC}")
+        # Solo permitir tipos de consulta específicos
+        if qtype not in ALLOWED_QTYPES:
+            log_info(f"[IGNORADO] Consulta {qtype} no permitida ({qname})")
             return
 
-        # Mostrar la consulta que se recibió
-        print(f"\n{bcolors.OKBLUE}[INFO] Consulta recibida:{bcolors.ENDC}")
-        print(f"{bcolors.OKGREEN}  Nombre de dominio: {qname}{bcolors.ENDC}")
-        print(f"{bcolors.OKGREEN}  Tipo de consulta: {qtype}{bcolors.ENDC}")
+        log_info(f"[🔍 CONSULTA] {qname} ({qtype})")
 
-        # Crear la consulta DNS en formato binario
         doh_query = request.pack()
 
-        # Enviar la consulta al servidor DoH usando POST
-        try:
-            start_time = time.time()  # Medir el tiempo de la solicitud
-
-            headers = {
+        # 🔁 Intentar cada servidor DoH disponible
+        for server in DOH_SERVERS:
+            response = send_doh_request_with_retries(server, doh_query, {
                 "Accept": "application/dns-message",
                 "Content-Type": "application/dns-message"
-            }
-            response = requests.post(DOH_SERVER, data=doh_query, headers=headers)
-
-            # Medir tiempo de respuesta
-            elapsed_time = time.time() - start_time
-
-            if response.status_code == 200:
-                print(f"\n{bcolors.OKGREEN}[INFO] Respuesta recibida desde {DOH_SERVER}: OK{bcolors.ENDC}")
-                print(f"{bcolors.OKGREEN}[INFO] Tiempo de respuesta: {elapsed_time:.2f} segundos{bcolors.ENDC}")
-                print(f"{bcolors.OKGREEN}[INFO] Respuesta DoH (primeros 100 bytes): {response.content.hex()[:100]}...{bcolors.ENDC}")
-
-                # Enviar la respuesta al cliente
+            })
+            
+            if response:
+                log_info(f"[✅ RESPUESTA] {qname} ({qtype}) desde {server}")
+                log_info(f"[HEX] {response.content.hex()[:100]}...")
                 socket.sendto(response.content, self.client_address)
+                return
             else:
-                print(f"\n{bcolors.FAIL}[ERROR] Error al obtener la respuesta DoH: {response.status_code} - {response.text}{bcolors.ENDC}")
+                log_error(f"[❌ FALLÓ] No se pudo resolver {qname}")
 
-        except requests.RequestException as e:
-            print(f"\n{bcolors.FAIL}[ERROR] Error de conexión con el servidor DoH: {e}{bcolors.ENDC}")
-
-
-# Iniciar servidor DNS local en el puerto 53
-with socketserver.UDPServer(("127.0.0.1", 53), DNSProxy) as server:
-    print(f"\n{bcolors.OKBLUE}[INFO] Servidor DNS Proxy corriendo en 127.0.0.1:53...{bcolors.ENDC}")
-    print(f"{bcolors.OKBLUE}[INFO] Esperando consultas DNS...{bcolors.ENDC}")
-    try:
+# 🔥 Iniciar el servidor DNS local en la IP y puerto configurados
+try:
+    with socketserver.UDPServer((IP, PORT), DNSProxy) as server:
+        log_info(f"🔐 Servidor DNS Proxy con TLS corriendo en {IP}:{PORT}...")
         server.serve_forever()
-    except KeyboardInterrupt:
-        print(f"\n{bcolors.OKGREEN}[INFO] Servidor detenido por el usuario.{bcolors.ENDC}")
+except KeyboardInterrupt:
+    log_info("🔴 Servidor detenido por el usuario.")
