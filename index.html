@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Servidor DNS - Estadísticas y Configuración</title>
+    <title>Servidor DNS - Estadísticas, Configuración y Logs</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
     <style>
         * {
@@ -148,17 +148,29 @@
         .config-table td {
             background-color: #f9f9f9;
         }
+
+        /* Estilo para el contenedor de logs */
+        .log-container {
+            background-color: #f9f9f9;
+            padding: 20px;
+            margin-top: 20px;
+            border-radius: 8px;
+            font-family: monospace;
+            overflow-y: auto;
+            max-height: 300px;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>Servidor DNS - Estadísticas y Configuración</h1>
+    <h1>Servidor DNS - Estadísticas, Configuración y Logs</h1>
 
     <!-- Pestañas -->
     <div class="tabs">
         <div class="tab active" id="stats-tab">Estadísticas en Tiempo Real</div>
         <div class="tab" id="config-tab">Configuración</div>
+        <div class="tab" id="logs-tab">Logs</div> <!-- Nueva pestaña de Logs -->
     </div>
 
     <!-- Contenido de las pestañas -->
@@ -231,6 +243,19 @@
             </table>
         </div>
     </div>
+
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <!-- Nueva pestaña de Logs -->
+    <div id="logs-content" class="tab-content">
+        <h2>Logs del Servidor</h2>
+        <div id="log-container" class="log-container">
+            <pre><code id="log-content" class="language-javascript">Cargando logs...</code></pre>
+        </div>
+    </div>
+
 </div>
 
 <script>
@@ -274,40 +299,66 @@
             });
     }
 
-    // Función para recargar la configuración desde el servidor
-    function reloadConfig() {
-        fetch('/reload_config')
+    // Función para cargar los logs en tiempo real
+    function loadLogs() {
+        fetch('/logs')
             .then(response => response.json())
             .then(data => {
-                alert(data.status);
+                console.log('Logs recibidos:', data);  // Para depuración
+                if (data.logs && Array.isArray(data.logs)) {
+                    const logs = data.logs.join('\n');
+                    // Actualizamos el contenido del contenedor de logs
+                    const logContainer = document.getElementById('log-content');
+                    logContainer.textContent = logs;
+                    // Reaplicamos el resaltado de sintaxis después de actualizar el contenido
+                    Prism.highlightElement(logContainer);
+                } else {
+                    console.error('No se encontraron logs en la respuesta:', data);
+                    document.getElementById('log-content').textContent = 'No se encontraron logs disponibles.';
+                }
             })
             .catch(error => {
-                console.error('Error al recargar la configuración:', error);
+                console.error('Error al cargar los logs:', error);
+                document.getElementById('log-content').textContent = 'Error al cargar los logs.';
             });
     }
 
-    // Actualizar las estadísticas cada 5 segundos
-    setInterval(updateStats, 5000);
+    // Actualizar los logs cada 5 segundos
+    setInterval(loadLogs, 5000);
 
     // Actualizar las estadísticas por primera vez cuando la página cargue
     window.onload = () => {
         updateStats();
         loadConfig();
+        loadLogs();  // Cargar los logs al cargar la página
     };
 
     // Función para cambiar entre pestañas
     document.getElementById('stats-tab').addEventListener('click', function () {
         document.getElementById('stats-content').classList.add('active');
         document.getElementById('config-content').classList.remove('active');
+        document.getElementById('logs-content').classList.remove('active');
         document.getElementById('stats-tab').classList.add('active');
         document.getElementById('config-tab').classList.remove('active');
+        document.getElementById('logs-tab').classList.remove('active');
     });
 
     document.getElementById('config-tab').addEventListener('click', function () {
         document.getElementById('config-content').classList.add('active');
         document.getElementById('stats-content').classList.remove('active');
+        document.getElementById('logs-content').classList.remove('active');
         document.getElementById('config-tab').classList.add('active');
         document.getElementById('stats-tab').classList.remove('active');
+        document.getElementById('logs-tab').classList.remove('active');
+    });
+
+    document.getElementById('logs-tab').addEventListener('click', function () {
+        document.getElementById('logs-content').classList.add('active');
+        document.getElementById('stats-content').classList.remove('active');
+        document.getElementById('config-content').classList.remove('active');
+        document.getElementById('logs-tab').classList.add('active');
+        document.getElementById('stats-tab').classList.remove('active');
+        document.getElementById('config-tab').classList.remove('active');
     });
 </script>
 
