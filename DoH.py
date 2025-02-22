@@ -10,6 +10,7 @@ import configparser
 import threading
 import socket
 from flask import Flask, render_template, jsonify
+from flask_socketio import SocketIO, emit
 from collections import defaultdict
 from dnslib import DNSRecord, QTYPE
 
@@ -217,17 +218,20 @@ class DNSProxy(socketserver.BaseRequestHandler):
         query_duration = end_time - start_time
         log(f"[❌ FALLÓ] No se pudo resolver {qname} ({resolved_ip}) - Tiempo: {query_duration:.4f}s", "ERROR")
 
-# Inicializar la aplicación Flask y especificar el directorio de plantillas personalizado
-app = Flask(__name__, template_folder=os.path.abspath('./'))  # Utilizando la raíz del proyecto como la carpeta de plantillas
+# Inicializar la aplicación Flask
+app = Flask(__name__, template_folder=os.path.abspath('./'))
+
+# Configuración de SocketIO
+socketio = SocketIO(app)
 
 # Cargar configuración desde config.ini
 config = configparser.ConfigParser()
-config.read('config.ini')  # Asegúrate de que este archivo esté en la misma carpeta que el servidor Flask
+config.read('config.ini')
 
 # Ruta principal
 @app.route('/')
 def index():
-    return render_template('index.html')  # Flask buscará 'index.html' en la raíz del proyecto
+    return render_template('index.html')
 
 # Ruta para obtener las estadísticas en formato JSON
 @app.route('/stats')
@@ -241,25 +245,9 @@ def get_stats():
     }
     return jsonify(stats)
 
-# Ruta para mostrar la configuración actual desde config.ini
-@app.route('/config')
-def config_view():
-    # Extraer los parámetros desde el archivo config.ini
-    config_data = {
-        'Servers': config['DNS']['Servers'],
-        'AllowedQtypes': config['DNS']['AllowedQtypes'],
-        'IP': config['Server']['IP'],
-        'Port': config['Server']['Port'],
-        'RateLimit': config['Security']['RateLimit'],
-        'Blacklist': config['Security']['Blacklist'],
-        'LogFile': config['Logging']['LogFile']
-    }
-    return render_template('config.html', config_data=config_data)
-
 # Ruta para obtener la configuración en formato JSON (opcional)
 @app.route('/config_ini')
 def config_json():
-    # Crear un diccionario con la configuración del archivo INI
     config_data = {
         'doh_servers': config['DNS']['Servers'].split(','),
         'allowed_qtypes': config['DNS']['AllowedQtypes'].split(','),
@@ -270,9 +258,26 @@ def config_json():
     }
     return jsonify(config_data)
 
+@app.route('/logs')
+def get_logs():
+    log_file = 'dns_proxy.log'
+    logs = []
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, 'r') as file:
+                logs = file.readlines()
+            # Limitar la cantidad de líneas si el archivo es muy grande
+            logs = logs[-50:]  # Solo mostrar las últimas 50 líneas de los logs
+        except Exception as e:
+            return jsonify({"error": f"Error al leer el archivo de logs: {str(e)}"}), 500
+    else:
+        return jsonify({"error": "El archivo de logs no existe."}), 404
+    
+    return jsonify({'logs': logs})
+
 # Función para iniciar el servidor Flask en un hilo separado
 def run_flask():
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
 
 # Iniciar el servidor Flask en un hilo separado
 flask_thread = threading.Thread(target=run_flask)
