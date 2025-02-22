@@ -278,6 +278,7 @@
                 console.error('Error al cargar las estadísticas:', error);
             });
     }
+    setInterval(updateStats, 5000);
 
     // Función para cargar la configuración desde el archivo config.ini
     function loadConfig() {
