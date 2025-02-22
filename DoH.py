@@ -2,168 +2,325 @@ import requests
 import socketserver
 import logging
 import time
+import sys
 import os
+import platform
+import signal
 import configparser
+import threading
+import socket
+from flask import Flask, render_template, jsonify
+from collections import defaultdict
 from dnslib import DNSRecord, QTYPE
-import socket  # Asegúrate de que el módulo socket está importado
+
+# 🎨 Colores para la salida en terminal
+COLOR = {
+    "INFO": "\033[94m", "SUCCESS": "\033[92m", "WARNING": "\033[93m",
+    "ERROR": "\033[91m", "BOLD": "\033[1m", "UNDERLINE": "\033[4m",
+    "CYAN": "\033[96m", "MAGENTA": "\033[95m", "GRAY": "\033[90m", "RESET": "\033[0m"
+}
+
+# Variables globales
+query_count = defaultdict(int)  # Contador de consultas por IP
+blocked_domains = set()  # Lista negra de dominios
+success_count = 0
+error_count = 0
+total_query_time = 0
+config = configparser.ConfigParser()
+
+# Estadísticas para la interfaz web
+stats = {
+    "total_queries": 0,
+    "total_resolved": 0,
+    "total_failed": 0,
+    "blocked_domains_count": len(blocked_domains),
+}
+
+
+def show_help():
+    help_text = f"""
+{COLOR['SUCCESS']}═══════════════════════════════════════════════════════════════════════════════════════
+          🔹 {COLOR['BOLD']}DNS Proxy con soporte para DoH (DNS over HTTPS) - Guía de Uso 🔹{COLOR['RESET']}{COLOR['SUCCESS']}
+═══════════════════════════════════════════════════════════════════════════════════════{COLOR['RESET']}
+
+{COLOR['BOLD']}{COLOR['INFO']}📌 ¿Qué hace este script?{COLOR['RESET']}
+  - {COLOR['CYAN']}Este servidor DNS Proxy intercepta consultas DNS y las redirige a servidores DoH (DNS sobre HTTPS).{COLOR['RESET']}
+  - {COLOR['CYAN']}El objetivo es mejorar la privacidad y evitar bloqueos de los ISP.{COLOR['RESET']}
+
+{COLOR['BOLD']}🛠️ ¿Cómo funciona?{COLOR['RESET']}
+  {COLOR['INFO']}✔ Recibe consultas DNS en {COLOR['UNDERLINE']}{IP}:{PORT}{COLOR['RESET']}.
+  {COLOR['INFO']}✔ Convierte las consultas a DNS sobre HTTPS (DoH).
+  {COLOR['INFO']}✔ Envía las consultas a los servidores DoH configurados en config.ini.
+  {COLOR['INFO']}✔ Responde con la IP resuelta al cliente que hizo la consulta.
+
+{COLOR['BOLD']}🔧 Configuración:{COLOR['RESET']}
+  {COLOR['GRAY']}🛠️ Para personalizar el servidor, edita el archivo {COLOR['BOLD']}config.ini{COLOR['RESET']}{COLOR['GRAY']}:{COLOR['RESET']}
+    - Servidores DoH → [DNS] Servers=https://dns.google/dns-query,https://cloudflare-dns.com/dns-query
+    - Tipos de consultas permitidos → [DNS] AllowedQtypes=A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS
+    - IP y puerto del proxy → [Server] IP=127.0.0.1  Port=53
+  {COLOR['WARNING']}⚠️ Si no existe config.ini, se genera automáticamente con valores predeterminados.{COLOR['RESET']}
+
+{COLOR['BOLD']}📊 Características:{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Soporta consultas A, AAAA, CNAME, MX, TXT, NS, SOA, HTTPS.{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Registro detallado de logs en dns_proxy.log.{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Intentos de reenvío automáticos en caso de fallo.{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Protección contra consultas DNS maliciosas o bloqueadas.{COLOR['RESET']}
+
+{COLOR['BOLD']}📝 Comandos disponibles:{COLOR['RESET']}
+  {COLOR['INFO']}💡 Iniciar el servidor DNS Proxy:{COLOR['RESET']}  
+      {COLOR['BOLD']}{COLOR['CYAN']}python script.py{COLOR['RESET']}
+  
+  {COLOR['INFO']}ℹ️ Mostrar esta ayuda:{COLOR['RESET']}  
+      {COLOR['BOLD']}{COLOR['CYAN']}python script.py --help{COLOR['RESET']}
+
+{COLOR['SUCCESS']}═══════════════════════════════════════════════════════════════════════════════════════{COLOR['RESET']}
+"""
+    print(help_text)
+
 
 def create_default_config():
-    config = configparser.ConfigParser()
-
+    """Crea un archivo config.ini con valores predeterminados si no existe."""
     config['DNS'] = {
-        'Servers': 'https://cloudflare-dns.com/dns-query,https://dns.google/dns-query',  # Servidores DoH predeterminados
-        'AllowedQtypes': 'A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS'  # Tipos de consulta permitidos
+        'Servers': 'https://cloudflare-dns.com/dns-query,https://dns.google/dns-query',
+        'AllowedQtypes': 'A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS'
     }
-    config['Server'] = {
-        'IP': '127.0.0.1',  # IP local predeterminada (todas las interfaces)
-        'Port': '53'  # Puerto predeterminado
-    }
-    config['Logging'] = {
-        'LogFile': 'dns_proxy.log'  # Archivo de log predeterminado
-    }
+    config['Server'] = {'IP': '127.0.0.1', 'Port': '53'}
+    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt'}
+    config['Logging'] = {'LogFile': 'dns_proxy.log'}
 
     with open('config.ini', 'w') as configfile:
         config.write(configfile)
 
 
-# 🔹 Leer configuración desde el archivo .ini
-config = configparser.ConfigParser()
+if not os.path.exists('config.ini'):
+    create_default_config()
+
 config.read('config.ini')
 
 DOH_SERVERS = config['DNS']['Servers'].split(',')
 ALLOWED_QTYPES = config['DNS']['AllowedQtypes'].split(',')
 IP = config['Server']['IP']
 PORT = int(config['Server']['Port'])
+RATE_LIMIT = int(config['Security']['RateLimit'])
+BLACKLIST_FILE = config['Security']['Blacklist']
 
-# 🔹 Configuración de logging
-logging.basicConfig(filename=config['Logging']['LogFile'], level=logging.INFO, 
+if os.path.exists(BLACKLIST_FILE):
+    with open(BLACKLIST_FILE) as f:
+        blocked_domains.update(line.strip() for line in f if line.strip())
+        
+SUCCESS_LEVEL = 25
+logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
+logging.basicConfig(filename=config['Logging']['LogFile'], level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Variables de estadísticas
-success_count = 0
-error_count = 0
-total_query_time = 0
-query_count = 0
 
-def log_info(message):
-    """Función para logear y mostrar mensajes de info en la terminal con colores."""
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())  # Timestamp detallado
-    print(f"{COLOR['INFO']}[{timestamp}] {message}{COLOR['RESET']}")
-    logging.info(f"{timestamp} - {message}")
+def log(message, level="INFO"):
+    global stats
 
-def log_error(message):
-    """Función para logear y mostrar mensajes de error en la terminal con colores."""
+    # Actualizar estadísticas
+    if "consultas exitosas" in message:
+        stats["total_resolved"] += 1
+    elif "consultas fallidas" in message:
+        stats["total_failed"] += 1
+    stats["total_queries"] += 1
+    
+    # Obtener el timestamp y color según el nivel de log
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    print(f"{COLOR['ERROR']}[{timestamp}] {message}{COLOR['RESET']}")
-    logging.error(f"{timestamp} - {message}")
+    color = COLOR[level] if level in COLOR else ""
+    
+    # Mostrar el mensaje en la terminal con el color correspondiente
+    print(f"{color}[{timestamp}] {message}{COLOR['RESET']}")
 
-def log_success(message):
-    """Función para logear y mostrar mensajes de éxito en la terminal con colores."""
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    print(f"{COLOR['SUCCESS']}[{timestamp}] {message}{COLOR['RESET']}")
-    logging.info(f"{timestamp} - {message}")
+    # Usar el método de logging adecuado para el nivel
+    if level.lower() == "info":
+        logging.info(message)
+    elif level.lower() == "warning":
+        logging.warning(message)
+    elif level.lower() == "error":
+        logging.error(message)
+    elif level.lower() == "success":
+        # Usamos info() para 'success' porque no existe un método específico
+        logging.info(message)
 
-def log_warning(message):
-    """Función para logear y mostrar mensajes de advertencia en la terminal con colores."""
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    print(f"{COLOR['WARNING']}[{timestamp}] {message}{COLOR['RESET']}")
-    logging.warning(f"{timestamp} - {message}")
 
-# 🎨 Colores para la salida en terminal (para hacerla más legible)
-COLOR = {
-    "INFO": "\033[94m",  # Azul
-    "SUCCESS": "\033[92m",  # Verde
-    "WARNING": "\033[93m",  # Amarillo
-    "ERROR": "\033[91m",  # Rojo
-    "RESET": "\033[0m"  # Reset de color
-}
+def send_doh_request(server, doh_query, headers, retries=3, delay=2):
+    """Intenta resolver una consulta DNS usando DoH con reintentos."""
+    global success_count, error_count, total_query_time
 
-# Leer configuración desde el archivo .ini
-if not os.path.exists('config.ini'):
-    print(f"{COLOR['WARNING']}El archivo config.ini no encontrado, creando uno por defecto...{COLOR['RESET']}")
-    create_default_config()
-
-def send_doh_request_with_retries(server, doh_query, headers, retries=3, delay=2):
-    """Función para intentar enviar la consulta DoH con reintentos."""
-    global success_count, error_count, total_query_time, query_count  # Usamos variables globales para estadísticas
     for attempt in range(retries):
         try:
             start_time = time.time()
             response = requests.post(server, data=doh_query, headers=headers, timeout=3)
             elapsed_time = time.time() - start_time
-            query_count += 1
-            total_query_time += elapsed_time  # Acumulamos el tiempo total de consultas exitosas
+            total_query_time += elapsed_time
 
             if response.status_code == 200:
-                success_count += 1  # Incrementamos el contador de éxitos
-                return response, elapsed_time
+                success_count += 1
+                return response.content
             else:
-                log_error(f"[⚠️ ERROR] {server} respondió {response.status_code} - {response.text}")
-        except requests.RequestException as e:
-            log_error(f"[⛔ ERROR] Intento {attempt+1} de {retries}: No se pudo conectar a {server}: {e}")
-        
-        if attempt < retries - 1:
-            time.sleep(delay)
-    
-    error_count += 1  # Incrementamos el contador de errores
-    return None, None
+                log(f"[⚠️ ERROR] {server} respondió {response.status_code}", "ERROR")
+        except requests.RequestException:
+            log(f"[⛔ ERROR] Intento {attempt+1}/{retries}: No se pudo conectar a {server}", "ERROR")
 
-def print_stats():
-    """Imprime las estadísticas de desempeño."""
-    if query_count > 0:
-        avg_time = total_query_time / query_count
-        log_info(f"🔹 Estadísticas de rendimiento:")
-        log_info(f"  - Consultas exitosas: {success_count}")
-        log_info(f"  - Consultas fallidas: {error_count}")
-        log_info(f"  - Tiempo promedio por consulta: {avg_time:.4f}s")
-    else:
-        log_info("🔹 No se han procesado consultas aún.")
+        time.sleep(delay)
+    
+    error_count += 1
+    return None
+
 
 class DNSProxy(socketserver.BaseRequestHandler):
     def handle(self):
-        data, sock = self.request  # Cambié 'socket' a 'sock' aquí
-        request = DNSRecord.parse(data)
+        client_ip = self.client_address[0]
+        query_count[client_ip] += 1
 
+        # Verifica si RATE_LIMIT es 0 (sin límite) o si se supera el límite de consultas
+        if RATE_LIMIT != 0 and query_count[client_ip] > RATE_LIMIT:
+            log(f"[🚫 BLOQUEADO] {client_ip} superó el límite de {RATE_LIMIT} consultas", "WARNING")
+            return
+
+        data, sock = self.request
+        request = DNSRecord.parse(data)
         qname = str(request.q.qname)
         qtype = QTYPE.get(request.q.qtype, "UNKNOWN")
 
-        # 🛑 Ignorar PTR (evita consultas reversas de IPs locales)
-        if qtype == 'PTR':
-            log_warning(f"[IGNORADO] Consulta PTR para {qname}")
+        # Resolución de la IP del dominio
+        try:
+            resolved_ip = socket.gethostbyname(qname)  # Resuelve el dominio a una IP
+        except socket.gaierror:
+            resolved_ip = "No se pudo resolver"
+
+        if qtype == 'PTR' or qname in blocked_domains:
+            log(f"[🚫 BLOQUEADO] Consulta denegada para {qname}", "WARNING")
             return
 
-        # Solo permitir tipos de consulta específicos
         if qtype not in ALLOWED_QTYPES:
-            log_warning(f"[IGNORADO] Consulta {qtype} no permitida ({qname})")
+            log(f"[🚫 IGNORADO] Tipo {qtype} no permitido ({qname})", "WARNING")
             return
 
-        log_info(f"[🔍 CONSULTA] Dominio: {qname} | Tipo: {qtype}")
+        # Log mejorado con más detalles, incluyendo el tiempo de la consulta
+        start_time = time.time()  # Inicio de la consulta
+        log(f"[🔍 CONSULTA] {qname} ({qtype}) de {client_ip} → Resolución: {resolved_ip}", "INFO")
 
         doh_query = request.pack()
+        headers = {"Accept": "application/dns-message", "Content-Type": "application/dns-message"}
 
-        # 🔁 Intentar cada servidor DoH disponible
         for server in DOH_SERVERS:
-            response, elapsed_time = send_doh_request_with_retries(server, doh_query, {
-                "Accept": "application/dns-message",
-                "Content-Type": "application/dns-message"
-            })
-            
+            response = send_doh_request(server, doh_query, headers)
             if response:
-                # Obtener la IP de destino
-                ip_destino = socket.gethostbyname(qname) if qtype in ['A', 'AAAA'] else "N/A"
-                log_success(f"[✅ RESPUESTA] Dominio: {qname} | Tipo: {qtype} | IP Destino: {ip_destino} | "
-                            f"Servidor DoH: {server} | Tiempo: {elapsed_time:.3f}s")  # Más precisión en el tiempo
-                log_info(f"[HEX] {response.content.hex()[:100]}...")  # Muestra solo los primeros 100 bytes del resultado
-                sock.sendto(response.content, self.client_address)  # Enviar la respuesta al cliente
+                end_time = time.time()  # Fin de la consulta
+                query_duration = end_time - start_time  # Duración total
+                log(f"[✅ RESPUESTA] {qname} ({qtype}) desde {server} → Resolución: {resolved_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
+                sock.sendto(response, self.client_address)
                 return
-            else:
-                log_error(f"[❌ FALLÓ] No se pudo resolver {qname}")
 
-# 🔥 Iniciar el servidor DNS local en la IP y puerto configurados
-try:
-    with socketserver.UDPServer((IP, PORT), DNSProxy) as server:
-        log_success(f"🔐 Servidor DNS Proxy con TLS corriendo en {IP}:{PORT}...\n{'-'*50}")
-        server.serve_forever()
-except KeyboardInterrupt:
-    log_info("🔴 Servidor detenido por el usuario.")
-    print_stats()
+        end_time = time.time()  # Fin en caso de fallo
+        query_duration = end_time - start_time
+        log(f"[❌ FALLÓ] No se pudo resolver {qname} ({resolved_ip}) - Tiempo: {query_duration:.4f}s", "ERROR")
+
+# Inicializar la aplicación Flask y especificar el directorio de plantillas personalizado
+app = Flask(__name__, template_folder=os.path.abspath('./'))  # Utilizando la raíz del proyecto como la carpeta de plantillas
+
+# Cargar configuración desde config.ini
+config = configparser.ConfigParser()
+config.read('config.ini')  # Asegúrate de que este archivo esté en la misma carpeta que el servidor Flask
+
+# Ruta principal
+@app.route('/')
+def index():
+    return render_template('index.html')  # Flask buscará 'index.html' en la raíz del proyecto
+
+# Ruta para obtener las estadísticas en formato JSON
+@app.route('/stats')
+def get_stats():
+    stats = {
+        "total_queries": sum(query_count.values()),
+        "success_count": success_count,
+        "error_count": error_count,
+        "avg_time": total_query_time / success_count if success_count else 0,
+        "blocked_domains_count": len(blocked_domains),
+    }
+    return jsonify(stats)
+
+# Ruta para mostrar la configuración actual desde config.ini
+@app.route('/config')
+def config_view():
+    # Extraer los parámetros desde el archivo config.ini
+    config_data = {
+        'Servers': config['DNS']['Servers'],
+        'AllowedQtypes': config['DNS']['AllowedQtypes'],
+        'IP': config['Server']['IP'],
+        'Port': config['Server']['Port'],
+        'RateLimit': config['Security']['RateLimit'],
+        'Blacklist': config['Security']['Blacklist'],
+        'LogFile': config['Logging']['LogFile']
+    }
+    return render_template('config.html', config_data=config_data)
+
+# Ruta para obtener la configuración en formato JSON (opcional)
+@app.route('/config_ini')
+def config_json():
+    # Crear un diccionario con la configuración del archivo INI
+    config_data = {
+        'doh_servers': config['DNS']['Servers'].split(','),
+        'allowed_qtypes': config['DNS']['AllowedQtypes'].split(','),
+        'server_ip': config['Server']['IP'],
+        'server_port': int(config['Server']['Port']),
+        'rate_limit': int(config['Security']['RateLimit']),
+        'blacklist_file': config['Security']['Blacklist'],
+    }
+    return jsonify(config_data)
+
+# Función para iniciar el servidor Flask en un hilo separado
+def run_flask():
+    app.run(host='0.0.0.0', port=5000, debug=False)
+
+# Iniciar el servidor Flask en un hilo separado
+flask_thread = threading.Thread(target=run_flask)
+flask_thread.daemon = True
+flask_thread.start()
+
+def print_stats():
+    """Imprime estadísticas de rendimiento."""
+    avg_time = total_query_time / success_count if success_count else 0
+    log("🔹 Estadísticas de rendimiento:", "INFO")
+    log(f"  - Consultas exitosas: {success_count}", "INFO")
+    log(f"  - Consultas fallidas: {error_count}", "INFO")
+    log(f"  - Tiempo promedio por consulta: {avg_time:.4f}s", "INFO")
+
+
+def reload_config(signal, frame):
+    """Recarga la configuración al recibir SIGHUP sin detener el servidor."""
+    global DOH_SERVERS, ALLOWED_QTYPES, RATE_LIMIT, blocked_domains
+    config.read('config.ini')
+    DOH_SERVERS = config['DNS']['Servers'].split(',')
+    ALLOWED_QTYPES = config['DNS']['AllowedQtypes'].split(',')
+    RATE_LIMIT = int(config['Security']['RateLimit'])
+
+    if os.path.exists(BLACKLIST_FILE):
+        with open(BLACKLIST_FILE) as f:
+            blocked_domains.clear()
+            blocked_domains.update(line.strip() for line in f if line.strip())
+
+    log("🔄 Configuración recargada.", "SUCCESS")
+
+# Verificar si el sistema operativo soporta SIGHUP antes de intentar registrar la señal
+if platform.system() != "Windows":
+    signal.signal(signal.SIGHUP, reload_config)
+else:
+    log("[⚠️ ERROR] SIGHUP no disponible en este sistema.", "ERROR")
+
+if __name__ == "__main__":
+    if "--help" in sys.argv:
+        show_help()
+        sys.exit(0)
+    if "--stats" in sys.argv:
+        print_stats()
+        sys.exit(0)
+
+    try:
+        with socketserver.UDPServer((IP, PORT), DNSProxy) as server:
+            log(f"🔐 Servidor DNS Proxy con TLS corriendo en {IP}:{PORT}...", "SUCCESS")
+            server.serve_forever()
+    except KeyboardInterrupt:
+        log("🔴 Servidor detenido por el usuario.", "INFO")
+        print_stats()
