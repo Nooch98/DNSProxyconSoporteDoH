@@ -10,6 +10,8 @@ import signal
 import configparser
 import threading
 import socket
+import shutil
+import subprocess
 from flask import Flask, render_template, jsonify
 from flask_socketio import SocketIO, emit
 from collections import defaultdict
@@ -87,7 +89,7 @@ def create_default_config():
         'AllowedQtypes': 'A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS'
     }
     config['Server'] = {'IP': '127.0.0.1', 'Port': '53'}
-    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt'}
+    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True'}
     config['Logging'] = {'LogFile': 'dns_proxy.log'}
 
     with open('config.ini', 'w') as configfile:
@@ -254,11 +256,57 @@ class DNSProxy(socketserver.BaseRequestHandler):
         query_duration = end_time - start_time
         log(f"[❌ FALLÓ] No se pudo resolver {qname} ({resolved_ip}) - Tiempo: {query_duration:.4f}s", "ERROR")
 
+def iniciar_stunnel():
+    # Determinar la ruta del ejecutable según el sistema operativo
+    if platform.system() == "Windows":
+        # Obtener la ruta de LOCALAPPDATA
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        stunnel_executable = os.path.join(local_app_data, "Programs", "stunnel", "bin", "stunnel.exe")
+    else:
+        stunnel_executable = "stunnel"
+    
+    # Verificar si el ejecutable existe
+    if (platform.system() == "Windows" and not os.path.exists(stunnel_executable)) or \
+       (platform.system() != "Windows" and shutil.which(stunnel_executable) is None):
+        user_input = input(
+            "stunnel no está instalado o no se encontró en la ruta estándar.\n"
+            "stunnel se utiliza para crear un túnel seguro que ofusque el tráfico DNS y mitigue bloqueos del ISP.\n"
+            "¿Desea obtener instrucciones para instalarlo? (s/n): "
+        )
+        if user_input.lower() in ['s', 'si']:
+            print("\nInstrucciones de instalación:")
+            if platform.system() == "Windows":
+                print("  - Visita https://www.stunnel.org/downloads.html y descarga la versión para Windows.")
+                print("  - Instálalo y asegúrate de que se encuentre en '%LOCALAPPDATA%\\Programs\\stunnel\\bin\\stunnel.exe'")
+            elif platform.system() == "Linux":
+                print("  - En distribuciones basadas en Debian/Ubuntu, ejecuta: sudo apt install stunnel4")
+                print("  - En otras distribuciones, usa el gestor de paquetes correspondiente.")
+            else:
+                print("  - Consulta la documentación de stunnel en https://www.stunnel.org/")
+            proceed = input("\n¿Deseas continuar sin stunnel? (s/n): ")
+            if proceed.lower() not in ['s', 'si']:
+                sys.exit("Por favor, instala stunnel y reinicia el programa.")
+            else:
+                print("Continuando sin stunnel.")
+                return None
+        else:
+            print("Continuando sin stunnel.")
+            return None
+
+    # La ruta del archivo de configuración se toma desde el directorio de la aplicación
+    stunnel_config_path = os.path.join(os.path.dirname(__file__), 'stunnel.conf')
+    
+    try:
+        stunnel_proc = subprocess.Popen([stunnel_executable, stunnel_config_path])
+        log("stunnel iniciado correctamente.", "SUCCESS")
+        time.sleep(2)  # Esperar a que stunnel se inicie
+        return stunnel_proc
+    except Exception as e:
+        log(f"Error al iniciar stunnel: {e}", "ERROR")
+        return None
+
 # Inicializar la aplicación Flask
 app = Flask(__name__, template_folder=os.path.abspath('./'))
-
-# Configuración de SocketIO
-
 
 # Cargar configuración desde config.ini
 config = configparser.ConfigParser()
@@ -311,7 +359,7 @@ def get_logs():
     
     return jsonify({'logs': logs})
 
-# Función para iniciar el servidor Flask en un hilo separado
+# Función para iniciar el servidor Flask
 def run_flask():
     app.run(host='127.0.0.1', port=5000, debug=False)
 
@@ -357,6 +405,8 @@ if __name__ == "__main__":
     if "--stats" in sys.argv:
         print_stats()
         sys.exit(0)
+        
+    stunnel_proc = iniciar_stunnel()
 
     try:
         with socketserver.UDPServer((IP, PORT), DNSProxy) as server:
@@ -365,3 +415,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         log("🔴 Servidor detenido por el usuario.", "INFO")
         print_stats()
+    finally:
+        if stunnel_proc:
+            stunnel_proc.terminate()
+            log("stunnel detenido", "INFO")
