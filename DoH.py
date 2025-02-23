@@ -28,6 +28,7 @@ blocked_domains = set()  # Lista negra de dominios
 success_count = 0
 error_count = 0
 total_query_time = 0
+server_index = 0
 config = configparser.ConfigParser()
 
 # Estadísticas para la interfaz web
@@ -118,6 +119,14 @@ logging.basicConfig(filename=config['Logging']['LogFile'], level=logging.INFO,
 STEALTH_MODE = config.getboolean('Security', 'StealthMode')
 BLOCKED_IPS_FILE = "blocked_ips.txt"
 
+def get_next_doh_server():
+    global server_index
+    # Seleccionamos el servidor en la posición 'server_index'
+    server = DOH_SERVERS[server_index]
+    # Actualizamos el índice para que apunte al siguiente servidor
+    server_index = (server_index + 1) % len(DOH_SERVERS)  # Asegura que volvamos al primer servidor después del último
+    return server
+
 def log(message, level="INFO"):
     global stats
 
@@ -156,6 +165,7 @@ def send_doh_request(server, doh_query, headers, retries=3, delay=2):
     global success_count, error_count, total_query_time
 
     for attempt in range(retries):
+        server = get_next_doh_server()  # Seleccionar el siguiente servidor utilizando balanceo de carga round-robin
         try:
             start_time = time.time()
             response = requests.post(server, data=doh_query, headers=headers, timeout=3)
@@ -171,7 +181,6 @@ def send_doh_request(server, doh_query, headers, retries=3, delay=2):
                 if not DOH_SERVERS:
                     log("[⛔ ERROR] No quedan servidores DoH disponibles.", "ERROR")
                     return None
-                server = DOH_SERVERS[0]
         except requests.RequestException:
             pass
 
@@ -233,7 +242,7 @@ class DNSProxy(socketserver.BaseRequestHandler):
         headers = {"Accept": "application/dns-message", "Content-Type": "application/dns-message"}
 
         for server in DOH_SERVERS:
-            response = send_doh_request(server, doh_query, headers)
+            response = send_doh_request(server, doh_query, headers, retries=3)
             if response:
                 end_time = time.time()  # Fin de la consulta
                 query_duration = end_time - start_time  # Duración total
