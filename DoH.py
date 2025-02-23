@@ -1,3 +1,4 @@
+from http import client
 import requests
 import socketserver
 import logging
@@ -36,7 +37,6 @@ stats = {
     "total_failed": 0,
     "blocked_domains_count": len(blocked_domains),
 }
-
 
 def show_help():
     help_text = f"""
@@ -115,6 +115,9 @@ logging.basicConfig(filename=config['Logging']['LogFile'], level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 
+STEALTH_MODE = config.getboolean('Security', 'StealthMode')
+BLOCKED_IPS_FILE = "blocked_ips.txt"
+
 def log(message, level="INFO"):
     global stats
 
@@ -143,9 +146,13 @@ def log(message, level="INFO"):
         # Usamos info() para 'success' porque no existe un método específico
         logging.info(message)
 
+def cargar_ips_bloqueadas():
+    if os.path.exists(BLOCKED_IPS_FILE):
+        with open(BLOCKED_IPS_FILE) as f:
+            return set(f.read().splitlines())
+    return set()
 
 def send_doh_request(server, doh_query, headers, retries=3, delay=2):
-    """Intenta resolver una consulta DNS usando DoH con reintentos."""
     global success_count, error_count, total_query_time
 
     for attempt in range(retries):
@@ -158,21 +165,37 @@ def send_doh_request(server, doh_query, headers, retries=3, delay=2):
             if response.status_code == 200:
                 success_count += 1
                 return response.content
-            else:
-                log(f"[⚠️ ERROR] {server} respondió {response.status_code}", "ERROR")
+            elif response.status_code == 403 and STEALTH_MODE:
+                log(f"[🚨 STEALTH] {server} bloqueado, cambiando servidor...", "WARNING")
+                DOH_SERVERS.remove(server)
+                if not DOH_SERVERS:
+                    log("[⛔ ERROR] No quedan servidores DoH disponibles.", "ERROR")
+                    return None
+                server = DOH_SERVERS[0]
         except requests.RequestException:
-            log(f"[⛔ ERROR] Intento {attempt+1}/{retries}: No se pudo conectar a {server}", "ERROR")
+            pass
 
         time.sleep(delay)
     
     error_count += 1
     return None
 
+blocked_ips = cargar_ips_bloqueadas()
+
+def bloquear_ip(ip):
+    blocked_ips.add(ip)
+    with open(BLOCKED_IPS_FILE, "a") as f:
+        f.write(ip + "\n")
+    log(f"[⛔ BLOQUEADO] IP {ip} detectada por posible DNS Tunneling", "WARNING")
 
 class DNSProxy(socketserver.BaseRequestHandler):
     def handle(self):
         client_ip = self.client_address[0]
         query_count[client_ip] += 1
+        
+        if client_ip in blocked_ips:
+            log(f"[⛔ BLOQUEADO] {client_ip} intentó conectarse", "WARNING")
+            return
 
         # Verifica si RATE_LIMIT es 0 (sin límite) o si se supera el límite de consultas
         if RATE_LIMIT != 0 and query_count[client_ip] > RATE_LIMIT:
@@ -196,6 +219,10 @@ class DNSProxy(socketserver.BaseRequestHandler):
 
         if qtype not in ALLOWED_QTYPES:
             log(f"[🚫 IGNORADO] Tipo {qtype} no permitido ({qname})", "WARNING")
+            return
+        
+        if qtype == 'TXT' and len(data) > 300:
+            bloquear_ip(client_ip)
             return
 
         # Log mejorado con más detalles, incluyendo el tiempo de la consulta
@@ -222,7 +249,7 @@ class DNSProxy(socketserver.BaseRequestHandler):
 app = Flask(__name__, template_folder=os.path.abspath('./'))
 
 # Configuración de SocketIO
-socketio = SocketIO(app)
+
 
 # Cargar configuración desde config.ini
 config = configparser.ConfigParser()
@@ -277,7 +304,7 @@ def get_logs():
 
 # Función para iniciar el servidor Flask en un hilo separado
 def run_flask():
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+    app.run(host='127.0.0.1', port=5000, debug=False)
 
 # Iniciar el servidor Flask en un hilo separado
 flask_thread = threading.Thread(target=run_flask)
