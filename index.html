@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Servidor DNS - Estadísticas, Configuración y Logs</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {
             margin: 0;
@@ -136,7 +137,7 @@
         }
         .config-table th,
         .config-table td {
-            padding: 16px;
+            padding: 18px;
             border: 1px solid #ddd;
             text-align: left;
             font-size: 1.2rem;
@@ -157,6 +158,13 @@
             font-family: monospace;
             overflow-y: auto;
             max-height: 300px;
+        }
+
+        canvas {
+            max-width: 100%;
+            height: auto !important;
+            display: block;
+            margin: 0 auto;
         }
 
         /* Estilos del tema oscuro */
@@ -204,37 +212,103 @@
             color: #eaeaea;
         }
         body[data-theme='dark'] .config-table td {
-            background-color: #444;
+            background-color: #3a3a3a;
             color: #eaeaea;
         }
         body[data-theme='dark'] .card {
-            background-color: #444;
+            background-color: #3a3a3a;
+            transition: background-color 0.3s;
         }
         
+        body[data-theme='dark'] .card:hover {
+            background-color: #444;
+        }
+
         body[data-theme='dark'] h1 {
             color: #eaeaea;
         }
 
         /* Estilo para el botón de cambio de tema */
-        #theme-toggle {
-            background-color: #007bff;
-            color: #fff;
-            border: none;
-            font-size: 1.5rem;
-            border-radius: 50%;
-            padding: 12px 16px;
+        .theme-switch {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        
+        .theme-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
             cursor: pointer;
-            transition: background-color 0.3s, transform 0.3s;
-            margin-left: 20px;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 34px;
         }
-
-        #theme-toggle:hover {
+        
+        /* El círculo del switch */
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            border-radius: 50%;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: 0.4s;
+        }
+        
+        /* Cuando el switch está activado */
+        input:checked + .slider {
+            background-color: #007bff;
+        }
+        
+        /* Cuando el círculo se mueve a la derecha */
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        .slider:hover {
             background-color: #0056b3;
-            transform: scale(1.1);
         }
-
-        #theme-toggle:focus {
-            outline: none;
+        
+        /* Estilo para los iconos */
+        .icon {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 18px;
+            transition: 0.4s;
+        }
+        
+        .icon-left {
+            left: 8px;
+        }
+        
+        .icon-right {
+            right: 8px;
+            opacity: 0;
+        }
+        
+        /* Cuando el switch está activado, movemos los iconos */
+        input:checked + .slider .icon-left {
+            opacity: 0;
+        }
+        
+        input:checked + .slider .icon-right {
+            opacity: 1;
         }
 
     </style>
@@ -249,7 +323,6 @@
         <div class="tab active" id="stats-tab">Estadísticas en Tiempo Real</div>
         <div class="tab" id="config-tab">Configuración</div>
         <div class="tab" id="logs-tab">Logs</div>
-        <button class="theme-toggle" id="theme-toggle">🌙</button>
     </div>
 
     <!-- Contenido de las pestañas -->
@@ -277,6 +350,11 @@
                     </tr>
                 </tbody>
             </table>
+        </div>
+
+        <!-- 📈 Gráfico -->
+        <div class="card">
+            <canvas id="statsChart"></canvas>
         </div>
 
         <button class="button" id="reload-btn" onclick="reloadConfig()">Recargar Configuración</button>
@@ -337,14 +415,59 @@
 
 </div>
 
+<label class="theme-switch" id="theme-toggle">
+    <input type="checkbox" id="theme-switch">
+    <span class="slider">
+        <span class="icon icon-left">🌙</span> <!-- Icono de luna -->
+        <span class="icon icon-right">🌞</span> <!-- Icono de sol -->
+    </span>
+</label>
+
 <script>
     // Función para cambiar entre modo claro y oscuro
-    const themeToggle = document.getElementById('theme-toggle');
-    themeToggle.addEventListener('click', () => {
-        const currentTheme = document.body.dataset.theme;
-        const newTheme = currentTheme === 'dark' ? '' : 'dark';
-        document.body.dataset.theme = newTheme;
-        themeToggle.innerText = newTheme === 'dark' ? '🌞' : '🌙';
+    const themeSwitch = document.getElementById('theme-switch');
+    const body = document.body;
+    const themeIconLeft = document.querySelector('.icon-left');
+    const themeIconRight = document.querySelector('.icon-right');
+
+    // Verifica si ya hay un tema guardado en el navegador
+    const currentTheme = localStorage.getItem('theme') || '';
+    if (currentTheme === 'dark') {
+        themeSwitch.checked = true;
+        body.dataset.theme = 'dark';
+        themeIconLeft.style.opacity = '1';  // Luna visible en tema oscuro
+        themeIconRight.style.opacity = '0'; // Sol invisible en tema oscuro
+    } else {
+        themeIconLeft.style.opacity = '0'; // Luna invisible en tema claro
+        themeIconRight.style.opacity = '1'; // Sol visible en tema claro
+    }
+
+    themeSwitch.addEventListener('change', () => {
+        if (themeSwitch.checked) {
+            body.dataset.theme = 'dark';
+            themeIconLeft.style.opacity = '1'; // Luna visible en tema oscuro
+            themeIconRight.style.opacity = '0'; // Sol invisible en tema oscuro
+            localStorage.setItem('theme', 'dark'); // Guardar tema oscuro
+        } else {
+            body.dataset.theme = '';
+            themeIconLeft.style.opacity = '0'; // Luna invisible en tema claro
+            themeIconRight.style.opacity = '1'; // Sol visible en tema claro
+            localStorage.setItem('theme', ''); // Guardar tema claro
+        }
+    });
+
+    const ctx = document.getElementById('statsChart').getContext('2d');
+    const statsChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Éxitos', 'Errores'],
+            datasets: [{
+                label: 'Consultas',
+                data: [0, 0],
+                backgroundColor: ['#28a745', '#dc3545']
+            }]
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } }
     });
     
     // Función para actualizar las estadísticas en la página
@@ -352,19 +475,19 @@
         fetch('/stats')
             .then(response => response.json())
             .then(data => {
-                document.getElementById('total_queries').textContent = data.total_queries;
-                document.getElementById('success_count').textContent = data.success_count;
-                document.getElementById('error_count').textContent = data.error_count;
-                document.getElementById('avg_time').textContent = data.avg_time.toFixed(2) + " ms";
-                document.getElementById('blocked_domains_count').textContent = data.blocked_domains_count;
+                statsChart.data.datasets[0].data = [data.success_count, data.error_count];
+                statsChart.update();
 
-                // Ocultar el mensaje de carga y mostrar la tabla
+                document.getElementById('total_queries').innerText = data.total_queries;
+                document.getElementById('success_count').innerText = data.success_count;
+                document.getElementById('error_count').innerText = data.error_count;
+                document.getElementById('avg_time').innerText = `${data.avg_time.toFixed(3)} ms`;
+                document.getElementById('blocked_domains_count').innerText = data.blocked_domains_count;
+
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('stats-table').style.display = 'block';
             })
-            .catch(error => {
-                console.error('Error al cargar las estadísticas:', error);
-            });
+            .catch(error => console.error('Error:', error));
     }
     setInterval(updateStats, 5000);
 
@@ -386,6 +509,10 @@
             .catch(error => {
                 console.error('Error al cargar la configuración:', error);
             });
+    }
+
+    function reloadConfig() {
+        updateStats();
     }
 
     // Función para cargar los logs en tiempo real
