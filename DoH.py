@@ -4,7 +4,9 @@ import logging
 import time
 import sys
 import os
+import re
 import platform
+import psutil
 import signal
 import configparser
 import threading
@@ -122,6 +124,53 @@ STEALTH_MODE = config.getboolean('Security', 'StealthMode')
 BLOCKED_IPS_FILE = "blocked_ips.txt"
 server_latencies = {server: float('inf') for server in DOH_SERVERS}
 latency_lock = threading.Lock()
+server = None
+server_thread = None
+flask_app_running = True
+
+def get_active_interface():
+    """Obtiene el nombre de la interfaz de red activa en Windows."""
+    try:
+        output = subprocess.check_output("netsh interface show interface", shell=True, text=True)
+        for line in output.splitlines()[2:]:  # Saltar encabezados
+            if "Connected" in line:
+                match = re.search(r"\s+(\S+)$", line)
+                if match:
+                    return match.group(1)
+        return None
+    except subprocess.CalledProcessError as e:
+        log(f"Error al obtener interfaz activa: {e}", "ERROR")
+        return None
+
+def set_windows_dns(ip, port):
+    interface = get_active_interface()
+    if not interface:
+        log("No se pudo determinar la interfaz de red activa.", "ERROR")
+        return False
+    
+    try:
+        cmd = f"netsh interface ip set dns name=\"{interface}\" source=static addr={ip}"
+        subprocess.run(cmd, shell=True, check=True, text=True)
+        log(f"DNS de Windows configurado a {ip} en la interfaz '{interface}'.", "SUCCESS")
+        return True
+    except subprocess.CalledProcessError as e:
+        log(f"Error al configurar DNS en Windows: {e}", "ERROR")
+        return False
+    
+def reset_windows_dns():
+    interface = get_active_interface()
+    if not interface:
+        log("No se pudo determinar la interfaz de red activa.", "ERROR")
+        return False
+    
+    try:
+        cmd = f"netsh interface ip set dns name=\"{interface}\" source=dhcp"
+        subprocess.run(cmd, shell=True, check=True, text=True)
+        log(f"DNS de Windows restaurado a automático en la interfaz '{interface}'.", "SUCCESS")
+        return True
+    except subprocess.CalledProcessError as e:
+        log(f"Error al restaurar DNS en Windows: {e}", "ERROR")
+        return False
 
 def measure_latency(server):
     try:
@@ -350,6 +399,53 @@ def requires_auth(f):
         return f(*args, **kwargs)
     return decorated
 
+@app.route('/restart', methods=['POST'])
+@requires_auth
+def restart_server():
+    global server, server_thread
+    try:
+        if server:
+            server.shutdown()
+            server.server_close()
+            if server_thread:
+                server_thread.join(timeout=2)  # Esperar a que el hilo termine
+            log("Servidor DNS detenido para reinicio.", "INFO")
+        
+        # Reiniciar el servidor en un nuevo hilo
+        server = socketserver.ThreadingUDPServer((IP, PORT), DNSProxy)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        
+        set_windows_dns(IP, PORT)
+        log(f"Servidor DNS reiniciado en {IP}:{PORT}.", "SUCCESS")
+        return jsonify({"message": "Servidor reiniciado correctamente"}), 200
+    except Exception as e:
+        log(f"Error al reiniciar el servidor: {e}", "ERROR")
+        return jsonify({"error": f"Error al reiniciar: {str(e)}"}), 500
+    
+@app.route('/stop', methods=['POST'])
+@requires_auth
+def stop_server():
+    global server, server_thread, flask_app_running
+    try:
+        if server:
+            server.shutdown()
+            server.server_close()
+            if server_thread:
+                server_thread.join(timeout=2)
+            log("Servidor DNS detenido.", "INFO")
+        
+        reset_windows_dns()
+        log("Aplicación Flask preparada para detenerse.", "INFO")
+        flask_app_running = False  # Señal para detener Flask
+        
+        # Terminar el proceso completo
+        threading.Thread(target=lambda: os._exit(0), daemon=True).start()
+        return jsonify({"message": "Servidor y aplicación detenidos"}), 200
+    except Exception as e:
+        log(f"Error al detener el servidor: {e}", "ERROR")
+        return jsonify({"error": f"Error al detener: {str(e)}"}), 500
+
 # Función log sin dependencia de Flask
 def log(message, level="INFO"):
     global stats, success_count, error_count
@@ -424,6 +520,16 @@ def config_json():
         reload_config(None, None)
         return jsonify({"message": "Configuración actualizada"}), 200
 
+@app.route('/system_stats')
+@requires_auth
+def system_stats():
+    """Devuelve estadísticas del sistema y latencias de servidores DoH."""
+    return jsonify({
+        "cpu_usage": psutil.cpu_percent(interval=1),
+        "memory_usage": psutil.virtual_memory().percent,
+    })
+
+
 # Ruta para logs
 @app.route('/logs')
 @requires_auth
@@ -486,7 +592,10 @@ def reload_config(signal, frame):
 
 # Función para iniciar Flask
 def run_flask():
-    app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)  # use_reloader=False para evitar problemas con hilos
+    while flask_app_running:
+        app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
+        if not flask_app_running:
+            break
 
 # Iniciar Flask en un hilo separado
 flask_thread = threading.Thread(target=run_flask)
@@ -517,6 +626,13 @@ def reload_config(signal, frame):
             blocked_domains.update(line.strip() for line in f if line.strip())
 
     log("🔄 Configuración recargada.", "SUCCESS")
+    
+def start_dns_server():
+    global server, server_thread
+    server = socketserver.ThreadingUDPServer((IP, PORT), DNSProxy)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    log(f"🔐 Servidor DNS Proxy corriendo en {IP}:{PORT}...", "SUCCESS")
 
 # Verificar si el sistema operativo soporta SIGHUP antes de intentar registrar la señal
 if platform.system() != "Windows":
@@ -533,15 +649,27 @@ if __name__ == "__main__":
         sys.exit(0)
         
     stunnel_proc = iniciar_stunnel()
+    
+    if set_windows_dns(IP, PORT):
+        log(f"Proxy DNS configurado en {IP}:{PORT} y DNS de Windows actualizado.", "SUCCESS")
+    else:
+        log("No se pudo configurar el DNS de Windows. Continuando sin cambios.", "WARNING")
+        
+    start_dns_server()
 
     try:
-        with ThreadingUDPServer((IP, PORT), DNSProxy) as server:
-            log(f"🔐 Servidor DNS Proxy con TLS corriendo en {IP}:{PORT}...", "SUCCESS")
-            server.serve_forever()
+        while flask_app_running:
+            time.sleep(1)
     except KeyboardInterrupt:
         log("🔴 Servidor detenido por el usuario.", "INFO")
         print_stats()
+        if server:
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=2)
+        reset_windows_dns()
     finally:
         if stunnel_proc:
             stunnel_proc.terminate()
             log("stunnel detenido", "INFO")
+        reset_windows_dns()
