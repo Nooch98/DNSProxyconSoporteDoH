@@ -181,7 +181,21 @@
                     <tbody><tr><td id="total_queries">0</td><td id="success_count">0</td><td id="error_count">0</td><td id="avg_time">0 ms</td><td id="blocked_domains_count">0</td></tr></tbody>
                 </table>
             </div>
+            <div class="card">
+                <h3>Estadísticas del Sistema</h3>
+                <table class="stats-table">
+                    <thead><tr><th>Uso de CPU</th><th>Uso de Memoria</th></tr></thead>
+                    <tbody>
+                        <tr>
+                            <td id="cpu_usage">0%</td>
+                            <td id="memory_usage">0%</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
             <button class="button" onclick="reloadConfig()">Recargar Configuración</button>
+            <button class="button" onclick="restartServer()">Reiniciar Servidor</button>
+            <button class="button" onclick="stopServer()">Detener Servidor</button>
             <div id="stats-error" class="alert alert-error" style="display: none;"></div>
         </div>
 
@@ -447,6 +461,41 @@
                     }
                 })
                 .catch(err => showToast(`Error al actualizar logs: ${err}`, 'error'));
+        }, 2000);
+
+        function restartServer() {
+            fetch('/restart', {
+                method: 'POST',
+                headers: { 'Authorization': 'Basic ' + btoa('admin:secret') }
+            })
+                .then(response => response.json())
+                .then(data => showToast(data.message || data.error, data.error ? 'error' : 'success'))
+                .catch(err => showToast(`Error al reiniciar: ${err}`, 'error'));
+        };
+
+        function stopServer() {
+            if (confirm("¿Estás seguro de que quieres detener el servidor y la aplicación?")) {
+                fetch('/stop', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Basic ' + btoa('admin:secret') }
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        showToast(data.message || data.error, data.error ? 'error' : 'success');
+                        setTimeout(() => window.close(), 1000); // Cierra la ventana del navegador tras 1 segundo
+                    })
+                    .catch(err => showToast(`Error al detener: ${err}`, 'error'));
+            }
+        };
+
+        setInterval(() => {
+            fetch('/system_stats', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('cpu_usage').textContent = `${data.cpu_usage}%`;
+                    document.getElementById('memory_usage').textContent = `${data.memory_usage}%`;
+                })
+                .catch(err => showToast(`Error al actualizar estadísticas del sistema: ${err}`, 'error'));
         }, 2000);
 
         setInterval(() => {
