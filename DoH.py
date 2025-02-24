@@ -434,6 +434,10 @@ def stop_server():
             if server_thread:
                 server_thread.join(timeout=2)
             log("Servidor DNS detenido.", "INFO")
+            
+        if stunnel_proc:
+            stunnel_proc.terminate()
+            log("stunnel detenido.", "INFO")
         
         reset_windows_dns()
         log("Aplicación Flask preparada para detenerse.", "INFO")
@@ -667,6 +671,9 @@ if __name__ == "__main__":
             server.shutdown()
             server.server_close()
             server_thread.join(timeout=2)
+        if stunnel_proc:
+            stunnel_proc.terminate()
+            log("stunnel detenido", "INFO")
         reset_windows_dns()
     finally:
         if stunnel_proc:
