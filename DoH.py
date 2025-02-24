@@ -1,4 +1,3 @@
-from http import client
 import requests
 import socketserver
 import logging
@@ -12,8 +11,9 @@ import threading
 import socket
 import shutil
 import subprocess
-from flask import Flask, render_template, jsonify
-from flask_socketio import SocketIO, emit
+from flask import Flask, render_template, jsonify, request
+from functools import wraps
+from socketserver import ThreadingUDPServer
 from collections import defaultdict
 from dnslib import DNSRecord, QTYPE
 
@@ -120,14 +120,31 @@ logging.basicConfig(filename=config['Logging']['LogFile'], level=logging.INFO,
 
 STEALTH_MODE = config.getboolean('Security', 'StealthMode')
 BLOCKED_IPS_FILE = "blocked_ips.txt"
+server_latencies = {server: float('inf') for server in DOH_SERVERS}
+latency_lock = threading.Lock()
 
-def get_next_doh_server():
-    global server_index
-    # Seleccionamos el servidor en la posición 'server_index'
-    server = DOH_SERVERS[server_index]
-    # Actualizamos el índice para que apunte al siguiente servidor
-    server_index = (server_index + 1) % len(DOH_SERVERS)  # Asegura que volvamos al primer servidor después del último
-    return server
+def measure_latency(server):
+    try:
+        start_time = time.time()
+        response = requests.get(server, timeout=2)  # Prueba simple con GET
+        latency = time.time() - start_time
+        with latency_lock:
+            server_latencies[server] = latency
+    except requests.RequestException:
+        with latency_lock:
+            server_latencies[server] = float('inf')  # Marca como inalcanzable
+            
+def update_server_latencies():
+    while True:
+        for server in DOH_SERVERS:
+            threading.Thread(target=measure_latency, args=(server,), daemon=True).start()
+        time.sleep(60)
+
+threading.Thread(target=update_server_latencies, daemon=True).start()
+
+def get_best_doh_server():
+    with latency_lock:
+        return min(server_latencies, key=server_latencies.get)
 
 def log(message, level="INFO"):
     global stats
@@ -163,11 +180,11 @@ def cargar_ips_bloqueadas():
             return set(f.read().splitlines())
     return set()
 
-def send_doh_request(server, doh_query, headers, retries=3, delay=2):
+def send_doh_request(doh_query, headers, retries=3, delay=2):
     global success_count, error_count, total_query_time
 
     for attempt in range(retries):
-        server = get_next_doh_server()  # Seleccionar el siguiente servidor utilizando balanceo de carga round-robin
+        server = get_best_doh_server()  # Usar el servidor más rápido
         try:
             start_time = time.time()
             response = requests.post(server, data=doh_query, headers=headers, timeout=3)
@@ -178,8 +195,10 @@ def send_doh_request(server, doh_query, headers, retries=3, delay=2):
                 success_count += 1
                 return response.content
             elif response.status_code == 403 and STEALTH_MODE:
-                log(f"[🚨 STEALTH] {server} bloqueado, cambiando servidor...", "WARNING")
-                DOH_SERVERS.remove(server)
+                log(f"[🚨 STEALTH] {server} bloqueado, eliminando...", "WARNING")
+                with latency_lock:
+                    DOH_SERVERS.remove(server)
+                    del server_latencies[server]
                 if not DOH_SERVERS:
                     log("[⛔ ERROR] No quedan servidores DoH disponibles.", "ERROR")
                     return None
@@ -243,14 +262,13 @@ class DNSProxy(socketserver.BaseRequestHandler):
         doh_query = request.pack()
         headers = {"Accept": "application/dns-message", "Content-Type": "application/dns-message"}
 
-        for server in DOH_SERVERS:
-            response = send_doh_request(server, doh_query, headers, retries=3)
-            if response:
-                end_time = time.time()  # Fin de la consulta
-                query_duration = end_time - start_time  # Duración total
-                log(f"[✅ RESPUESTA] {qname} ({qtype}) desde {server} → Resolución: {resolved_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
-                sock.sendto(response, self.client_address)
-                return
+        response = send_doh_request(doh_query, headers, retries=3)
+        if response:
+            end_time = time.time()
+            query_duration = end_time - start_time
+            log(f"[✅ RESPUESTA] {qname} ({qtype}) → Resolución: {resolved_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
+            sock.sendto(response, self.client_address)
+            return
 
         end_time = time.time()  # Fin en caso de fallo
         query_duration = end_time - start_time
@@ -305,44 +323,110 @@ def iniciar_stunnel():
         log(f"Error al iniciar stunnel: {e}", "ERROR")
         return None
 
-# Inicializar la aplicación Flask
+# Inicializar Flask
 app = Flask(__name__, template_folder=os.path.abspath('./'))
 
-# Cargar configuración desde config.ini
-config = configparser.ConfigParser()
-config.read('config.ini')
+# Configurar logging
+logging.basicConfig(filename=config['Logging']['LogFile'], level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Credenciales de autenticación
+WEB_USERNAME = config.get('Web', 'Username', fallback='admin')
+WEB_PASSWORD = config.get('Web', 'Password', fallback='secret')
+
+# Función de autenticación básica
+def check_auth(username, password):
+    return username == WEB_USERNAME and password == WEB_PASSWORD
+
+def authenticate():
+    return jsonify({"error": "Autenticación requerida"}), 401, {'WWW-Authenticate': 'Basic realm="Login Required"'}
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
+
+# Función log sin dependencia de Flask
+def log(message, level="INFO"):
+    global stats, success_count, error_count
+    if "consultas exitosas" in message:
+        stats["total_resolved"] += 1
+        success_count += 1
+    elif "consultas fallidas" in message:
+        stats["total_failed"] += 1
+        error_count += 1
+    stats["total_queries"] += 1
+    stats["blocked_domains_count"] = len(blocked_domains)
+
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    print(f"[{timestamp}] {message}")
+    if level.lower() == "info":
+        logging.info(message)
+    elif level.lower() == "warning":
+        logging.warning(message)
+    elif level.lower() == "error":
+        logging.error(message)
+    elif level.lower() == "success":
+        logging.info(message)
 
 # Ruta principal
 @app.route('/')
+@requires_auth
 def index():
     return render_template('index.html')
 
-# Ruta para obtener las estadísticas en formato JSON
+# Ruta para estadísticas
 @app.route('/stats')
+@requires_auth
 def get_stats():
-    stats = {
+    stats_data = {
         "total_queries": sum(query_count.values()),
         "success_count": success_count,
         "error_count": error_count,
         "avg_time": total_query_time / success_count if success_count else 0,
         "blocked_domains_count": len(blocked_domains),
     }
-    return jsonify(stats)
+    return jsonify(stats_data)
 
-# Ruta para obtener la configuración en formato JSON (opcional)
-@app.route('/config_ini')
+# Ruta para configuración
+@app.route('/config_ini', methods=['GET', 'PATCH'])
+@requires_auth
 def config_json():
-    config_data = {
-        'doh_servers': config['DNS']['Servers'].split(','),
-        'allowed_qtypes': config['DNS']['AllowedQtypes'].split(','),
-        'server_ip': config['Server']['IP'],
-        'server_port': int(config['Server']['Port']),
-        'rate_limit': int(config['Security']['RateLimit']),
-        'blacklist_file': config['Security']['Blacklist'],
-    }
-    return jsonify(config_data)
+    global config
+    if request.method == 'GET':
+        config_data = {
+            'doh_servers': config['DNS']['Servers'].split(','),
+            'allowed_qtypes': config['DNS']['AllowedQtypes'].split(','),
+            'server_ip': config['Server']['IP'],
+            'server_port': int(config['Server']['Port']),
+            'rate_limit': int(config['Security']['RateLimit']),
+            'blacklist_file': config['Security']['Blacklist'],
+        }
+        return jsonify(config_data)
+    
+    elif request.method == 'PATCH':
+        data = request.json
+        for key, value in data.items():
+            if key in ['doh_servers', 'allowed_qtypes']:
+                config['DNS'][key.replace('_', '')] = ','.join(value) if isinstance(value, list) else value
+            elif key in ['server_ip', 'server_port']:
+                config['Server'][key.replace('server_', '').capitalize()] = str(value)
+            elif key == 'rate_limit':
+                config['Security']['RateLimit'] = str(value)
+            elif key == 'blacklist_file':
+                config['Security']['Blacklist'] = value
+        with open('config.ini', 'w') as configfile:
+            config.write(configfile)
+        reload_config(None, None)
+        return jsonify({"message": "Configuración actualizada"}), 200
 
+# Ruta para logs
 @app.route('/logs')
+@requires_auth
 def get_logs():
     log_file = 'dns_proxy.log'
     logs = []
@@ -350,23 +434,65 @@ def get_logs():
         try:
             with open(log_file, 'r') as file:
                 logs = file.readlines()
-            # Limitar la cantidad de líneas si el archivo es muy grande
-            logs = logs[-50:]  # Solo mostrar las últimas 50 líneas de los logs
+            logs = logs[-50:]
         except Exception as e:
             return jsonify({"error": f"Error al leer el archivo de logs: {str(e)}"}), 500
     else:
         return jsonify({"error": "El archivo de logs no existe."}), 404
-    
     return jsonify({'logs': logs})
 
-# Función para iniciar el servidor Flask
-def run_flask():
-    app.run(host='127.0.0.1', port=5000, debug=False)
+# Rutas para lista negra
+@app.route('/blacklist', methods=['GET'])
+@requires_auth
+def get_blacklist():
+    return jsonify(list(blocked_domains))
 
-# Iniciar el servidor Flask en un hilo separado
+@app.route('/blacklist/add', methods=['POST'])
+@requires_auth
+def add_to_blacklist():
+    domain = request.json.get('domain')
+    if domain and domain not in blocked_domains:
+        blocked_domains.add(domain)
+        with open(config['Security']['Blacklist'], 'a') as f:
+            f.write(f"{domain}\n")
+        log(f"[🔒 BLACKLIST] Dominio {domain} añadido.", "SUCCESS")
+        return jsonify({"message": f"{domain} añadido a la lista negra"}), 200
+    return jsonify({"error": "Dominio no válido o ya existe"}), 400
+
+@app.route('/blacklist/remove', methods=['POST'])
+@requires_auth
+def remove_from_blacklist():
+    domain = request.json.get('domain')
+    if domain in blocked_domains:
+        blocked_domains.remove(domain)
+        with open(config['Security']['Blacklist'], 'w') as f:
+            f.writelines(f"{d}\n" for d in blocked_domains)
+        log(f"[🔓 BLACKLIST] Dominio {domain} eliminado.", "SUCCESS")
+        return jsonify({"message": f"{domain} eliminado de la lista negra"}), 200
+    return jsonify({"error": "Dominio no encontrado"}), 404
+
+# Función para recargar configuración
+def reload_config(signal, frame):
+    global config, blocked_domains, DOH_SERVERS, ALLOWED_QTYPES, RATE_LIMIT
+    config.read('config.ini')
+    DOH_SERVERS = config['DNS']['Servers'].split(',')
+    ALLOWED_QTYPES = config['DNS']['AllowedQtypes'].split(',')
+    RATE_LIMIT = int(config['Security']['RateLimit'])
+    if os.path.exists(config['Security']['Blacklist']):
+        with open(config['Security']['Blacklist']) as f:
+            blocked_domains.clear()
+            blocked_domains.update(line.strip() for line in f if line.strip())
+    log("🔄 Configuración recargada.", "SUCCESS")
+
+# Función para iniciar Flask
+def run_flask():
+    app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)  # use_reloader=False para evitar problemas con hilos
+
+# Iniciar Flask en un hilo separado
 flask_thread = threading.Thread(target=run_flask)
 flask_thread.daemon = True
 flask_thread.start()
+
 
 def print_stats():
     """Imprime estadísticas de rendimiento."""
@@ -409,7 +535,7 @@ if __name__ == "__main__":
     stunnel_proc = iniciar_stunnel()
 
     try:
-        with socketserver.UDPServer((IP, PORT), DNSProxy) as server:
+        with ThreadingUDPServer((IP, PORT), DNSProxy) as server:
             log(f"🔐 Servidor DNS Proxy con TLS corriendo en {IP}:{PORT}...", "SUCCESS")
             server.serve_forever()
     except KeyboardInterrupt:
