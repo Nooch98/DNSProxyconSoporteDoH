@@ -3,581 +3,459 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Servidor DNS - Estadísticas, Configuración y Logs</title>
+    <title>Servidor DNS - Dashboard Interactivo</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Roboto', sans-serif;
             background-color: #f2f3f5;
             color: #333;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             min-height: 100vh;
-            transition: background-color 0.3s, color 0.3s;
+            transition: background-color 0.3s;
         }
         .container {
             background-color: #ffffff;
             border-radius: 10px;
-            width: 80%;
-            max-width: 900px;
-            padding: 30px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            text-align: center;
-            transition: background-color 0.3s, box-shadow 0.3s;
+            width: 90%;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            animation: fadeIn 0.5s ease-in;
         }
-        .container:hover {
-            transform: scale(1.02);
-        }
-        h1 {
-            font-size: 2.5rem;
-            margin-bottom: 20px;
-            color: #333;
-            transition: color 0.3s ease;
-        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        h1 { font-size: 2rem; margin-bottom: 20px; }
         .tabs {
             display: flex;
+            flex-wrap: wrap;
             justify-content: center;
+            gap: 10px;
             margin-bottom: 20px;
         }
         .tab {
-            padding: 10px 20px;
-            margin: 0 10px;
+            padding: 8px 16px;
             cursor: pointer;
-            font-size: 1.2rem;
-            border-radius: 25px;
+            border-radius: 20px;
             background-color: #f8f9fa;
             border: 1px solid #ddd;
-            transition: background-color 0.3s ease, color 0.3s ease;
+            transition: transform 0.2s, background-color 0.3s;
         }
-        .tab:hover {
-            background-color: #007bff;
-            color: #fff;
-        }
-        .tab.active {
-            background-color: #007bff;
-            color: #fff;
-            font-weight: bold;
-        }
-        .tab-content {
-            display: none;
-            padding: 20px;
-        }
-        .tab-content.active {
-            display: block;
-        }
-        .stats-table {
+        .tab:hover { transform: scale(1.05); background-color: #007bff; color: #fff; }
+        .tab.active { background-color: #007bff; color: #fff; transform: scale(1.05); }
+        .tab-content { display: none; opacity: 0; transition: opacity 0.3s; }
+        .tab-content.active { display: block; opacity: 1; }
+        .stats-table, .config-table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 30px;
+            margin: 20px 0;
         }
-        .stats-table th,
-        .stats-table td {
-            padding: 16px;
+        .stats-table th, .stats-table td, .config-table th, .config-table td {
+            padding: 12px;
             border: 1px solid #ddd;
-            text-align: center;
-            font-size: 1.2rem;
         }
-        .stats-table th {
-            background-color: #007bff;
-            color: #fff;
-        }
-        .stats-table td {
-            background-color: #f9f9f9;
-        }
-        .stats-table td:nth-child(odd) {
-            background-color: #e9f0f9;
-        }
-        .loading {
-            font-size: 1.3rem;
-            color: #007bff;
-            margin-top: 20px;
-        }
+        .stats-table th, .config-table th { background-color: #007bff; color: #fff; }
+        .stats-table td, .config-table td { background-color: #f9f9f9; }
         .button {
-            margin-top: 30px;
-            padding: 12px 30px;
-            font-size: 1.1rem;
-            color: #fff;
+            padding: 10px 20px;
             background-color: #28a745;
-            border: none;
-            border-radius: 50px;
-            cursor: pointer;
-            transition: background-color 0.3s ease;
-        }
-        .button:hover {
-            background-color: #218838;
-        }
-        .button:focus {
-            outline: none;
-        }
-        .stats-item {
-            font-weight: bold;
-            color: #333;
-        }
-        .card {
-            background-color: #f1f1f1;
-            border-radius: 8px;
-            padding: 20px;
-            margin-top: 20px;
-            transition: background-color 0.3s ease;
-        }
-        .card:hover {
-            background-color: #e9f1f9;
-        }
-        .config-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 30px;
-        }
-        .config-table th,
-        .config-table td {
-            padding: 18px;
-            border: 1px solid #ddd;
-            text-align: left;
-            font-size: 1.2rem;
-        }
-        .config-table th {
-            background-color: #007bff;
             color: #fff;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: transform 0.2s, background-color 0.3s;
         }
-        .config-table td {
-            background-color: #f9f9f9;
-        }
-
+        .button:hover { transform: scale(1.05); background-color: #218838; }
+        .card { background-color: #f1f1f1; border-radius: 8px; padding: 15px; margin: 10px 0; transition: transform 0.2s; }
+        .card:hover { transform: translateY(-5px); }
         .log-container {
             background-color: #f9f9f9;
-            padding: 20px;
-            margin-top: 20px;
+            padding: 15px;
             border-radius: 8px;
-            font-family: monospace;
+            max-height: 400px;
             overflow-y: auto;
-            max-height: 300px;
+            font-family: monospace;
         }
-
-        canvas {
-            max-width: 100%;
-            height: auto !important;
-            display: block;
-            margin: 0 auto;
-        }
-
-        /* Estilos del tema oscuro */
-        body[data-theme='dark'] {
-            background-color: #121212;
-            color: #eaeaea;
-        }
-        
-        body[data-theme='dark'] .container {
-            background-color: #333;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-        }
-        
-        body[data-theme='dark'] .tab {
-            background-color: #444;
-            border: 1px solid #666;
-            color: #eaeaea;
-        }
-        
-        body[data-theme='dark'] .tab:hover {
-            background-color: #007bff;
+        .alert { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .alert-error { background-color: #f8d7da; color: #721c24; }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 5px;
             color: #fff;
+            animation: slideIn 0.5s, fadeOut 0.5s 2.5s forwards;
         }
-        
-        body[data-theme='dark'] .stats-table th {
-            background-color: #007bff;
-            color: #fff;
-        }
-        
-        body[data-theme='dark'] .button {
-            background-color: #218838;
-        }
-        
-        body[data-theme='dark'] .button:hover {
-            background-color: #1c7430;
-        }
-        
-        body[data-theme='dark'] .log-container {
-            background-color: #222;
-            color: #eaeaea;
-        }
+        .toast-success { background-color: #28a745; }
+        .toast-error { background-color: #dc3545; }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+        canvas { max-width: 100%; margin: 20px auto; }
 
-        body[data-theme='dark'] .stats-table td {
-            background-color: #333;
-            color: #eaeaea;
+        /* Blacklist & Search */
+        .blacklist-section, .search-section { margin: 20px 0; }
+        .search-input, .blacklist-input {
+            padding: 8px;
+            width: 70%;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            transition: border-color 0.3s;
         }
-        body[data-theme='dark'] .config-table td {
-            background-color: #3a3a3a;
-            color: #eaeaea;
-        }
-        body[data-theme='dark'] .card {
-            background-color: #3a3a3a;
+        .search-input:focus, .blacklist-input:focus { border-color: #007bff; outline: none; }
+        .blacklist-list { list-style: none; padding: 0; }
+        .blacklist-item {
+            padding: 8px;
+            background-color: #f9f9f9;
+            margin: 5px 0;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             transition: background-color 0.3s;
         }
-        
-        body[data-theme='dark'] .card:hover {
-            background-color: #444;
-        }
+        .blacklist-item:hover { background-color: #e9ecef; }
 
-        body[data-theme='dark'] h1 {
-            color: #eaeaea;
-        }
+        /* Editable Config */
+        .editable:hover { background-color: #e9ecef; cursor: pointer; }
+        .editable input { width: 100%; padding: 5px; border: none; background: transparent; }
 
-        /* Estilo para el botón de cambio de tema */
-        .theme-switch {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 1000;
-            display: inline-block;
-            width: 60px;
-            height: 34px;
-        }
-        
-        .theme-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: 0.4s;
-            border-radius: 34px;
-        }
-        
-        /* El círculo del switch */
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 26px;
-            width: 26px;
-            border-radius: 50%;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: 0.4s;
-        }
-        
-        /* Cuando el switch está activado */
-        input:checked + .slider {
-            background-color: #007bff;
-        }
-        
-        /* Cuando el círculo se mueve a la derecha */
-        input:checked + .slider:before {
-            transform: translateX(26px);
-        }
-        
-        .slider:hover {
-            background-color: #0056b3;
-        }
-        
-        /* Estilo para los iconos */
-        .icon {
-            position: absolute;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 18px;
-            transition: 0.4s;
-        }
-        
-        .icon-left {
-            left: 8px;
-        }
-        
-        .icon-right {
-            right: 8px;
-            opacity: 0;
-        }
-        
-        /* Cuando el switch está activado, movemos los iconos */
-        input:checked + .slider .icon-left {
-            opacity: 0;
-        }
-        
-        input:checked + .slider .icon-right {
-            opacity: 1;
-        }
+        /* Dark Theme */
+        body[data-theme='dark'] { background-color: #121212; color: #eaeaea; }
+        body[data-theme='dark'] .container { background-color: #333; }
+        body[data-theme='dark'] .tab { background-color: #444; border-color: #666; color: #eaeaea; }
+        body[data-theme='dark'] .tab:hover, body[data-theme='dark'] .tab.active { background-color: #007bff; }
+        body[data-theme='dark'] .stats-table td, body[data-theme='dark'] .config-table td, body[data-theme='dark'] .card, body[data-theme='dark'] .log-container { background-color: #3a3a3a; }
+        body[data-theme='dark'] .blacklist-item { background-color: #444; }
+        body[data-theme='dark'] .editable:hover { background-color: #555; }
 
+        /* Theme Switch */
+        .theme-switch { position: fixed; top: 10px; right: 10px; width: 60px; height: 34px; }
+        .theme-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; border-radius: 34px; transition: 0.4s; }
+        .slider:before { content: ""; position: absolute; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; border-radius: 50%; transition: 0.4s; }
+        input:checked + .slider { background-color: #007bff; }
+        input:checked + .slider:before { transform: translateX(26px); }
+        .icon { position: absolute; top: 50%; transform: translateY(-50%); font-size: 18px; transition: opacity 0.4s; }
+        .icon-left { left: 8px; }
+        .icon-right { right: 8px; opacity: 0; }
+        input:checked + .slider .icon-left { opacity: 0; }
+        input:checked + .slider .icon-right { opacity: 1; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container { width: 95%; padding: 10px; }
+            .tabs { flex-direction: column; align-items: center; }
+            .tab { margin: 5px 0; }
+            h1 { font-size: 1.5rem; }
+        }
     </style>
 </head>
 <body>
+    <div class="container" role="main">
+        <h1>Servidor DNS - Dashboard Interactivo</h1>
 
-<div class="container">
-    <h1>Servidor DNS - Estadísticas, Configuración y Logs</h1>
-
-    <!-- Pestañas -->
-    <div class="tabs">
-        <div class="tab active" id="stats-tab">Estadísticas en Tiempo Real</div>
-        <div class="tab" id="config-tab">Configuración</div>
-        <div class="tab" id="logs-tab">Logs</div>
-    </div>
-
-    <!-- Contenido de las pestañas -->
-    <div id="stats-content" class="tab-content active">
-        <div class="loading" id="loading">Cargando estadísticas...</div>
-
-        <div id="stats-table" class="card" style="display: none;">
-            <table class="stats-table">
-                <thead>
-                    <tr>
-                        <th>Total Consultas</th>
-                        <th>Consultas Exitosas</th>
-                        <th>Consultas Fallidas</th>
-                        <th>Tiempo Promedio</th>
-                        <th>Dominios Bloqueados</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td id="total_queries">0</td>
-                        <td id="success_count">0</td>
-                        <td id="error_count">0</td>
-                        <td id="avg_time">0 ms</td>
-                        <td id="blocked_domains_count">0</td>
-                    </tr>
-                </tbody>
-            </table>
+        <div class="tabs" role="tablist">
+            <div class="tab active" id="stats-tab" role="tab" aria-selected="true">Estadísticas</div>
+            <div class="tab" id="config-tab" role="tab" aria-selected="false">Configuración</div>
+            <div class="tab" id="logs-tab" role="tab" aria-selected="false">Logs</div>
+            <div class="tab" id="blacklist-tab" role="tab" aria-selected="false">Lista Negra</div>
         </div>
 
-        <!-- 📈 Gráfico -->
-        <div class="card">
-            <canvas id="statsChart"></canvas>
+        <div id="stats-content" class="tab-content active" role="tabpanel">
+            <div class="card">
+                <select id="chart-type" onchange="updateChartType()">
+                    <option value="bar">Barras</option>
+                    <option value="line">Líneas</option>
+                    <option value="pie">Pastel</option>
+                </select>
+                <canvas id="statsChart"></canvas>
+            </div>
+            <div id="stats-table" class="card">
+                <table class="stats-table">
+                    <thead><tr><th>Total Consultas</th><th>Consultas Exitosas</th><th>Consultas Fallidas</th><th>Tiempo Promedio</th><th>Dominios Bloqueados</th></tr></thead>
+                    <tbody><tr><td id="total_queries">0</td><td id="success_count">0</td><td id="error_count">0</td><td id="avg_time">0 ms</td><td id="blocked_domains_count">0</td></tr></tbody>
+                </table>
+            </div>
+            <button class="button" onclick="reloadConfig()">Recargar Configuración</button>
+            <div id="stats-error" class="alert alert-error" style="display: none;"></div>
         </div>
 
-        <button class="button" id="reload-btn" onclick="reloadConfig()">Recargar Configuración</button>
-    </div>
+        <div id="config-content" class="tab-content" role="tabpanel">
+            <h2>Configuración del Servidor</h2>
+            <div id="config-table" class="card">
+                <table class="config-table">
+                    <thead><tr><th>Parámetro</th><th>Valor</th></tr></thead>
+                    <tbody>
+                        <tr><td>Servidores DoH</td><td id="doh_servers" class="editable" data-key="doh_servers">Cargando...</td></tr>
+                        <tr><td>Tipos de Consulta Permitidos</td><td id="allowed_qtypes" class="editable" data-key="allowed_qtypes">Cargando...</td></tr>
+                        <tr><td>IP del Servidor</td><td id="server_ip" class="editable" data-key="server_ip">Cargando...</td></tr>
+                        <tr><td>Puerto del Servidor</td><td id="server_port" class="editable" data-key="server_port">Cargando...</td></tr>
+                        <tr><td>Límite de Consultas</td><td id="rate_limit" class="editable" data-key="rate_limit">Cargando...</td></tr>
+                        <tr><td>Archivo de Lista Negra</td><td id="blacklist_file" class="editable" data-key="blacklist_file">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="config-error" class="alert alert-error" style="display: none;"></div>
+        </div>
 
-    <div id="config-content" class="tab-content">
-        <h2>Configuración del Servidor</h2>
-        
-        <div id="config-table" class="card" style="display: none;">
-            <table class="config-table">
-                <thead>
-                    <tr>
-                        <th>Parámetro</th>
-                        <th>Valor</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Servidores DoH</td>
-                        <td id="doh_servers">Cargando...</td>
-                    </tr>
-                    <tr>
-                        <td>Tipos de Consulta Permitidos</td>
-                        <td id="allowed_qtypes">Cargando...</td>
-                    </tr>
-                    <tr>
-                        <td>IP del Servidor</td>
-                        <td id="server_ip">Cargando...</td>
-                    </tr>
-                    <tr>
-                        <td>Puerto del Servidor</td>
-                        <td id="server_port">Cargando...</td>
-                    </tr>
-                    <tr>
-                        <td>Límite de Consultas</td>
-                        <td id="rate_limit">Cargando...</td>
-                    </tr>
-                    <tr>
-                        <td>Archivo de Lista Negra</td>
-                        <td id="blacklist_file">Cargando...</td>
-                    </tr>
-                </tbody>
-            </table>
+        <div id="logs-content" class="tab-content" role="tabpanel">
+            <h2>Logs del Servidor</h2>
+            <div class="search-section">
+                <input type="text" id="log-search" class="search-input" placeholder="Buscar en logs..." onkeyup="filterLogs()">
+            </div>
+            <div id="log-container" class="log-container">
+                <pre><code id="log-content" class="language-python">Cargando logs...</code></pre>
+            </div>
+            <div id="logs-error" class="alert alert-error" style="display: none;"></div>
+        </div>
+
+        <div id="blacklist-content" class="tab-content" role="tabpanel">
+            <h2>Gestión de Lista Negra</h2>
+            <div class="blacklist-section card">
+                <input type="text" id="blacklist-input" class="blacklist-input" placeholder="Ingrese dominio a bloquear">
+                <button class="button" onclick="addToBlacklist()">Agregar</button>
+                <input type="text" id="blacklist-search" class="search-input" placeholder="Buscar dominios..." onkeyup="filterBlacklist()">
+                <ul id="blacklist-list" class="blacklist-list"></ul>
+            </div>
+            <div id="blacklist-error" class="alert alert-error" style="display: none;"></div>
         </div>
     </div>
 
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
-    
-    <div id="logs-content" class="tab-content">
-        <h2>Logs del Servidor</h2>
-        <div id="log-container" class="log-container">
-            <pre><code id="log-content" class="language-javascript">Cargando logs...</code></pre>
-        </div>
-    </div>
+    <label class="theme-switch" id="theme-toggle" aria-label="Cambiar tema">
+        <input type="checkbox" id="theme-switch">
+        <span class="slider"><span class="icon icon-left">🌙</span><span class="icon icon-right">🌞</span></span>
+    </label>
 
-</div>
+    <script>
+        const socket = io('http://localhost:5000');
+        let chartType = 'bar';
+        const statsChart = new Chart(document.getElementById('statsChart').getContext('2d'), {
+            type: chartType,
+            data: {
+                labels: ['Consultas Exitosas', 'Consultas Fallidas', 'Dominios Bloqueados'],
+                datasets: [{
+                    label: 'Estadísticas',
+                    data: [0, 0, 0],
+                    backgroundColor: ['#28a745', '#dc3545', '#ffc107'],
+                    borderColor: ['#28a745', '#dc3545', '#ffc107'],
+                    borderWidth: 1
+                }]
+            },
+            options: { responsive: true, scales: { y: { beginAtZero: true } } }
+        });
 
-<label class="theme-switch" id="theme-toggle">
-    <input type="checkbox" id="theme-switch">
-    <span class="slider">
-        <span class="icon icon-left">🌙</span> <!-- Icono de luna -->
-        <span class="icon icon-right">🌞</span> <!-- Icono de sol -->
-    </span>
-</label>
-
-<script>
-    // Función para cambiar entre modo claro y oscuro
-    const themeSwitch = document.getElementById('theme-switch');
-    const body = document.body;
-    const themeIconLeft = document.querySelector('.icon-left');
-    const themeIconRight = document.querySelector('.icon-right');
-
-    // Verifica si ya hay un tema guardado en el navegador
-    const currentTheme = localStorage.getItem('theme') || '';
-    if (currentTheme === 'dark') {
-        themeSwitch.checked = true;
-        body.dataset.theme = 'dark';
-        themeIconLeft.style.opacity = '1';  // Luna visible en tema oscuro
-        themeIconRight.style.opacity = '0'; // Sol invisible en tema oscuro
-    } else {
-        themeIconLeft.style.opacity = '0'; // Luna invisible en tema claro
-        themeIconRight.style.opacity = '1'; // Sol visible en tema claro
-    }
-
-    themeSwitch.addEventListener('change', () => {
-        if (themeSwitch.checked) {
-            body.dataset.theme = 'dark';
-            themeIconLeft.style.opacity = '1'; // Luna visible en tema oscuro
-            themeIconRight.style.opacity = '0'; // Sol invisible en tema oscuro
-            localStorage.setItem('theme', 'dark'); // Guardar tema oscuro
-        } else {
-            body.dataset.theme = '';
-            themeIconLeft.style.opacity = '0'; // Luna invisible en tema claro
-            themeIconRight.style.opacity = '1'; // Sol visible en tema claro
-            localStorage.setItem('theme', ''); // Guardar tema claro
+        // Tema oscuro/claro
+        const themeSwitch = document.getElementById('theme-switch');
+        if (localStorage.getItem('theme') === 'dark') {
+            document.body.dataset.theme = 'dark';
+            themeSwitch.checked = true;
         }
-    });
+        themeSwitch.addEventListener('change', () => {
+            document.body.dataset.theme = themeSwitch.checked ? 'dark' : '';
+            localStorage.setItem('theme', themeSwitch.checked ? 'dark' : '');
+        });
 
-    const ctx = document.getElementById('statsChart').getContext('2d');
-    const statsChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: ['Éxitos', 'Errores'],
-            datasets: [{
-                label: 'Consultas',
-                data: [0, 0],
-                backgroundColor: ['#28a745', '#dc3545']
-            }]
-        },
-        options: { responsive: true, scales: { y: { beginAtZero: true } } }
-    });
-    
-    // Función para actualizar las estadísticas en la página
-    function updateStats() {
-        fetch('/stats')
+        // Actualización en tiempo real
+        socket.on('stats_update', (data) => {
+            document.getElementById('total_queries').textContent = data.total_queries;
+            document.getElementById('success_count').textContent = data.success_count;
+            document.getElementById('error_count').textContent = data.error_count;
+            document.getElementById('avg_time').textContent = `${data.avg_time.toFixed(3)} ms`;
+            document.getElementById('blocked_domains_count').textContent = data.blocked_domains_count;
+            statsChart.data.datasets[0].data = [data.success_count, data.error_count, data.blocked_domains_count];
+            statsChart.update();
+            document.getElementById('stats-error').style.display = 'none';
+        });
+
+        socket.on('logs_update', (data) => {
+            if (data.logs && Array.isArray(data.logs)) {
+                document.getElementById('log-content').textContent = data.logs.join('\n');
+                Prism.highlightElement(document.getElementById('log-content'));
+                filterLogs(); // Reaplicar filtro si existe
+                document.getElementById('logs-error').style.display = 'none';
+            }
+        });
+
+        // Cambiar tipo de gráfico
+        function updateChartType() {
+            chartType = document.getElementById('chart-type').value;
+            statsChart.config.type = chartType;
+            statsChart.update();
+        }
+
+        // Cargar configuración inicial y edición inline
+        fetch('/config_ini', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
             .then(response => response.json())
             .then(data => {
-                statsChart.data.datasets[0].data = [data.success_count, data.error_count];
-                statsChart.update();
-
-                document.getElementById('total_queries').innerText = data.total_queries;
-                document.getElementById('success_count').innerText = data.success_count;
-                document.getElementById('error_count').innerText = data.error_count;
-                document.getElementById('avg_time').innerText = `${data.avg_time.toFixed(3)} ms`;
-                document.getElementById('blocked_domains_count').innerText = data.blocked_domains_count;
-
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('stats-table').style.display = 'block';
+                Object.keys(data).forEach(key => {
+                    const el = document.getElementById(key);
+                    if (el) {
+                        el.textContent = Array.isArray(data[key]) ? data[key].join(', ') : data[key];
+                        el.onclick = () => {
+                            const input = document.createElement('input');
+                            input.value = el.textContent;
+                            input.onblur = () => saveConfig(key, input.value);
+                            input.onkeypress = (e) => { if (e.key === 'Enter') saveConfig(key, input.value); };
+                            el.innerHTML = '';
+                            el.appendChild(input);
+                            input.focus();
+                        };
+                    }
+                });
+                document.getElementById('config-error').style.display = 'none';
             })
-            .catch(error => console.error('Error:', error));
-    }
-    setInterval(updateStats, 5000);
+            .catch(err => document.getElementById('config-error').textContent = `Error: ${err}`);
 
-    // Función para cargar la configuración desde el archivo config.ini
-    function loadConfig() {
-        fetch('/config_ini')
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('doh_servers').textContent = data.doh_servers.join(', ');
-                document.getElementById('allowed_qtypes').textContent = data.allowed_qtypes.join(', ');
-                document.getElementById('server_ip').textContent = data.server_ip;
-                document.getElementById('server_port').textContent = data.server_port;
-                document.getElementById('rate_limit').textContent = data.rate_limit;
-                document.getElementById('blacklist_file').textContent = data.blacklist_file;
-
-                // Ocultar el mensaje de carga y mostrar la tabla
-                document.getElementById('config-table').style.display = 'block';
+        function saveConfig(key, value) {
+            fetch('/config_ini', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + btoa('admin:secret') },
+                body: JSON.stringify({ [key]: value })
             })
-            .catch(error => {
-                console.error('Error al cargar la configuración:', error);
+                .then(() => showToast(`Configuración ${key} actualizada`, 'success'))
+                .catch(err => showToast(`Error al actualizar ${key}: ${err}`, 'error'));
+        }
+
+        // Gestión de Lista Negra
+        let blacklist = [];
+        function updateBlacklist() {
+            fetch('/blacklist', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
+                .then(response => response.json())
+                .then(data => {
+                    blacklist = data;
+                    renderBlacklist();
+                    document.getElementById('blacklist-error').style.display = 'none';
+                })
+                .catch(err => document.getElementById('blacklist-error').textContent = `Error: ${err}`);
+        }
+
+        function renderBlacklist() {
+            const list = document.getElementById('blacklist-list');
+            list.innerHTML = '';
+            const filter = document.getElementById('blacklist-search').value.toLowerCase();
+            blacklist.filter(domain => domain.toLowerCase().includes(filter)).forEach(domain => {
+                const li = document.createElement('li');
+                li.className = 'blacklist-item';
+                li.textContent = domain;
+                const btn = document.createElement('button');
+                btn.textContent = 'Eliminar';
+                btn.className = 'button';
+                btn.onclick = () => removeFromBlacklist(domain);
+                li.appendChild(btn);
+                list.appendChild(li);
             });
-    }
+        }
 
-    function reloadConfig() {
-        updateStats();
-    }
+        function addToBlacklist() {
+            const domain = document.getElementById('blacklist-input').value.trim();
+            if (domain) {
+                fetch('/blacklist/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + btoa('admin:secret') },
+                    body: JSON.stringify({ domain })
+                })
+                    .then(() => {
+                        updateBlacklist();
+                        document.getElementById('blacklist-input').value = '';
+                        showToast(`Dominio ${domain} añadido`, 'success');
+                    })
+                    .catch(err => showToast(`Error: ${err}`, 'error'));
+            }
+        }
 
-    // Función para cargar los logs en tiempo real
-    function loadLogs() {
-        fetch('/logs')
-            .then(response => response.json())
-            .then(data => {
-                console.log('Logs recibidos:', data);  // Para depuración
-                if (data.logs && Array.isArray(data.logs)) {
-                    const logs = data.logs.join('\n');
-                    // Actualizamos el contenido del contenedor de logs
-                    const logContainer = document.getElementById('log-content');
-                    logContainer.textContent = logs;
-                    // Reaplicamos el resaltado de sintaxis después de actualizar el contenido
-                    Prism.highlightElement(logContainer);
-                } else {
-                    console.error('No se encontraron logs en la respuesta:', data);
-                    document.getElementById('log-content').textContent = 'No se encontraron logs disponibles.';
-                }
+        function removeFromBlacklist(domain) {
+            fetch('/blacklist/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + btoa('admin:secret') },
+                body: JSON.stringify({ domain })
             })
-            .catch(error => {
-                console.error('Error al cargar los logs:', error);
-                document.getElementById('log-content').textContent = 'Error al cargar los logs.';
+                .then(() => {
+                    updateBlacklist();
+                    showToast(`Dominio ${domain} eliminado`, 'success');
+                })
+                .catch(err => showToast(`Error: ${err}`, 'error'));
+        }
+
+        function filterBlacklist() {
+            renderBlacklist();
+        }
+
+        // Filtrado de Logs
+        function filterLogs() {
+            const filter = document.getElementById('log-search').value.toLowerCase();
+            const lines = document.getElementById('log-content').textContent.split('\n');
+            document.getElementById('log-content').textContent = lines.filter(line => line.toLowerCase().includes(filter)).join('\n');
+            Prism.highlightElement(document.getElementById('log-content'));
+        }
+
+        function reloadConfig() {
+            fetch('/stats', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
+                .then(response => response.json())
+                .then(data => socket.emit('stats_update', data))
+                .catch(err => showToast(`Error al recargar: ${err}`, 'error'));
+        }
+
+        // Notificaciones Toast
+        function showToast(message, type) {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Manejo de pestañas
+        const tabs = document.querySelectorAll('.tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.getElementById(`${tab.id.replace('-tab', '')}-content`).classList.add('active');
+                tab.classList.add('active');
+                if (tab.id === 'blacklist-tab') updateBlacklist();
             });
-    }
+        });
 
-    // Actualizar los logs cada 5 segundos
-    setInterval(loadLogs, 5000);
+        setInterval(() => {
+            fetch('/stats', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('total_queries').textContent = data.total_queries;
+                    document.getElementById('success_count').textContent = data.success_count;
+                    document.getElementById('error_count').textContent = data.error_count;
+                    document.getElementById('avg_time').textContent = `${data.avg_time.toFixed(3)} ms`;
+                    document.getElementById('blocked_domains_count').textContent = data.blocked_domains_count;
+                    statsChart.data.datasets[0].data = [data.success_count, data.error_count, data.blocked_domains_count];
+                    statsChart.update();
+                })
+                .catch(err => showToast(`Error al actualizar estadísticas: ${err}`, 'error'));
+        }, 2000);
 
-    // Actualizar las estadísticas por primera vez cuando la página cargue
-    window.onload = () => {
-        updateStats();
-        loadConfig();
-        loadLogs();  // Cargar los logs al cargar la página
-    };
+        setInterval(() => {
+            fetch('/logs', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.logs && Array.isArray(data.logs)) {
+                        document.getElementById('log-content').textContent = data.logs.join('\n');
+                        Prism.highlightElement(document.getElementById('log-content'));
+                        filterLogs();
+                    }
+                })
+                .catch(err => showToast(`Error al actualizar logs: ${err}`, 'error'));
+        }, 2000);
 
-    // Función para cambiar entre pestañas
-    document.getElementById('stats-tab').addEventListener('click', function () {
-        document.getElementById('stats-content').classList.add('active');
-        document.getElementById('config-content').classList.remove('active');
-        document.getElementById('logs-content').classList.remove('active');
-        document.getElementById('stats-tab').classList.add('active');
-        document.getElementById('config-tab').classList.remove('active');
-        document.getElementById('logs-tab').classList.remove('active');
-    });
+        setInterval(() => {
+            updateBlacklist();
+        }, 2000);
 
-    document.getElementById('config-tab').addEventListener('click', function () {
-        document.getElementById('config-content').classList.add('active');
-        document.getElementById('stats-content').classList.remove('active');
-        document.getElementById('logs-content').classList.remove('active');
-        document.getElementById('stats-tab').classList.remove('active');
-        document.getElementById('config-tab').classList.add('active');
-        document.getElementById('logs-tab').classList.remove('active');
-    });
-
-    document.getElementById('logs-tab').addEventListener('click', function () {
-        document.getElementById('logs-content').classList.add('active');
-        document.getElementById('stats-content').classList.remove('active');
-        document.getElementById('config-content').classList.remove('active');
-        document.getElementById('stats-tab').classList.remove('active');
-        document.getElementById('config-tab').classList.remove('active');
-        document.getElementById('logs-tab').classList.add('active');
-    });
-
-</script>
-
+        window.onload = () => {
+            updateBlacklist();
+        };
+    </script>
 </body>
 </html>
