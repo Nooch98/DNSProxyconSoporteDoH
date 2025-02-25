@@ -85,14 +85,14 @@ def show_help():
 
 
 def create_default_config():
-    """Crea un archivo config.ini con valores predeterminados si no existe."""
     config['DNS'] = {
-        'Servers': 'https://cloudflare-dns.com/dns-query,https://dns.google/dns-query',
+        'Servers': 'https://1.1.1.1/dns-query,https://8.8.8.8/dns-query',
         'AllowedQtypes': 'A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS'
     }
     config['Server'] = {'IP': '127.0.0.1', 'Port': '53'}
     config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True'}
     config['Logging'] = {'LogFile': 'dns_proxy.log'}
+    config['Web'] = {'Username': 'admin', 'Password': 'secret'}
 
     with open('config.ini', 'w') as configfile:
         config.write(configfile)
@@ -104,6 +104,8 @@ if not os.path.exists('config.ini'):
 config.read('config.ini')
 
 DOH_SERVERS = config['DNS']['Servers'].split(',')
+if not DOH_SERVERS or not DOH_SERVERS[0]:
+    DOH_SERVERS = ["https://8.8.8.8/dns-query", "https://1.1.1.1/dns-query"]
 ALLOWED_QTYPES = config['DNS']['AllowedQtypes'].split(',')
 IP = config['Server']['IP']
 PORT = int(config['Server']['Port'])
@@ -232,27 +234,29 @@ def cargar_ips_bloqueadas():
 def send_doh_request(doh_query, headers, retries=3, delay=2):
     global success_count, error_count, total_query_time
 
-    for attempt in range(retries):
-        server = get_best_doh_server()  # Usar el servidor más rápido
-        try:
-            start_time = time.time()
-            response = requests.post(server, data=doh_query, headers=headers, timeout=3)
-            elapsed_time = time.time() - start_time
-            total_query_time += elapsed_time
+    for server in DOH_SERVERS:
+        for attempt in range(retries):
+            try:
+                start_time = time.time()
+                response = requests.post(server, data=doh_query, headers=headers, timeout=5)
+                elapsed_time = time.time() - start_time
+                total_query_time += elapsed_time
+                server_latencies[server] = elapsed_time
 
-            if response.status_code == 200:
-                success_count += 1
-                return response.content
-            elif response.status_code == 403 and STEALTH_MODE:
-                log(f"[🚨 STEALTH] {server} bloqueado, eliminando...", "WARNING")
-                with latency_lock:
-                    DOH_SERVERS.remove(server)
-                    del server_latencies[server]
-                if not DOH_SERVERS:
-                    log("[⛔ ERROR] No quedan servidores DoH disponibles.", "ERROR")
-                    return None
-        except requests.RequestException:
-            pass
+                if response.status_code == 200:
+                    success_count += 1
+                    return response.content
+                elif response.status_code == 403 and STEALTH_MODE:
+                    log(f"[🚨 STEALTH] {server} bloqueado, eliminando...", "WARNING")
+                    with latency_lock:
+                        DOH_SERVERS.remove(server)
+                        del server_latencies[server]
+                    if not DOH_SERVERS:
+                        log("[⛔ ERROR] No quedan servidores DoH disponibles.", "ERROR")
+                        return None
+            except requests.RequestException as e:
+                log(f"[❌ DoH] Error al conectar a {server} (intento {attempt + 1}/{retries}): {e}", "ERROR")
+                server_latencies[server] = float('inf')
 
         time.sleep(delay)
     
@@ -276,52 +280,76 @@ class DNSProxy(socketserver.BaseRequestHandler):
             log(f"[⛔ BLOQUEADO] {client_ip} intentó conectarse", "WARNING")
             return
 
-        # Verifica si RATE_LIMIT es 0 (sin límite) o si se supera el límite de consultas
         if RATE_LIMIT != 0 and query_count[client_ip] > RATE_LIMIT:
             log(f"[🚫 BLOQUEADO] {client_ip} superó el límite de {RATE_LIMIT} consultas", "WARNING")
             return
 
         data, sock = self.request
-        request = DNSRecord.parse(data)
+        try:
+            request = DNSRecord.parse(data)
+        except Exception as e:
+            log(f"[❌ ERROR] No se pudo parsear solicitud DNS desde {client_ip}: {e}", "ERROR")
+            return
+        
         qname = str(request.q.qname)
         qtype = QTYPE.get(request.q.qtype, "UNKNOWN")
 
-        # Resolución de la IP del dominio
-        try:
-            resolved_ip = socket.gethostbyname(qname)  # Resuelve el dominio a una IP
-        except socket.gaierror:
-            resolved_ip = "No se pudo resolver"
-
         if qtype == 'PTR' or qname in blocked_domains:
             log(f"[🚫 BLOQUEADO] Consulta denegada para {qname}", "WARNING")
+            reply = request.reply()
+            reply.header.rcode = 3  # NXDOMAIN
+            sock.sendto(reply.pack(), self.client_address)
             return
 
         if qtype not in ALLOWED_QTYPES:
-            log(f"[🚫 IGNORADO] Tipo {qtype} no permitido ({qname})", "WARNING")
+            log(f"[🚫 IGNORADO] Tipo {qtype} no permitido para {qname}", "WARNING")
             return
         
         if qtype == 'TXT' and len(data) > 300:
             bloquear_ip(client_ip)
             return
 
-        # Log mejorado con más detalles, incluyendo el tiempo de la consulta
-        start_time = time.time()  # Inicio de la consulta
-        log(f"[🔍 CONSULTA] {qname} ({qtype}) de {client_ip} → Resolución: {resolved_ip}", "INFO")
+        start_time = time.time()
+        log(f"[🔍 CONSULTA] {qname} ({qtype}) de {client_ip}", "INFO")
 
         doh_query = request.pack()
         headers = {"Accept": "application/dns-message", "Content-Type": "application/dns-message"}
 
         response = send_doh_request(doh_query, headers, retries=3)
         if response:
-            end_time = time.time()
-            query_duration = end_time - start_time
-            log(f"[✅ RESPUESTA] {qname} ({qtype}) → Resolución: {resolved_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
-            sock.sendto(response, self.client_address)
+            try:
+                dns_response = DNSRecord.parse(response)
+                end_time = time.time()
+                query_duration = end_time - start_time
+                # Manejar diferentes tipos de respuesta
+                if qtype == 'A' and dns_response.get_a():
+                    resolved_ip = str(dns_response.get_a().rdata)
+                elif qtype == 'AAAA' and any(r.rtype == QTYPE.AAAA for r in dns_response.rr):
+                    resolved_ip = str(next(r.rdata for r in dns_response.rr if r.rtype == QTYPE.AAAA))
+                elif qtype == 'HTTPS' and any(r.rtype == QTYPE.HTTPS for r in dns_response.rr):
+                    resolved_ip = "HTTPS Record"
+                else:
+                    resolved_ip = "No IP"
+                log(f"[✅ RESPUESTA] {qname} ({qtype}) → Resolución: {resolved_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
+                sock.sendto(response, self.client_address)
+            except Exception as e:
+                log(f"[❌ ERROR] No se pudo parsear respuesta DoH para {qname}: {e}", "ERROR")
+                # Enviar la respuesta tal cual si es válida, o NXDOMAIN si falla
+                if response:
+                    sock.sendto(response, self.client_address)
+                else:
+                    reply = request.reply()
+                    reply.header.rcode = 3  # NXDOMAIN
+                    sock.sendto(reply.pack(), self.client_address)
             return
 
-        end_time = time.time()  # Fin en caso de fallo
+        end_time = time.time()
         query_duration = end_time - start_time
-        log(f"[❌ FALLÓ] No se pudo resolver {qname} ({resolved_ip}) - Tiempo: {query_duration:.4f}s", "ERROR")
+        log(f"[❌ FALLÓ] No se pudo resolver {qname} - Tiempo: {query_duration:.4f}s", "ERROR")
+        # Enviar NXDOMAIN como fallback si falla DoH
+        reply = request.reply()
+        reply.header.rcode = 3  # NXDOMAIN
+        sock.sendto(reply.pack(), self.client_address)
 
 def iniciar_stunnel():
     # Determinar la ruta del ejecutable según el sistema operativo
@@ -647,9 +675,6 @@ else:
 if __name__ == "__main__":
     if "--help" in sys.argv:
         show_help()
-        sys.exit(0)
-    if "--stats" in sys.argv:
-        print_stats()
         sys.exit(0)
         
     stunnel_proc = iniciar_stunnel()
