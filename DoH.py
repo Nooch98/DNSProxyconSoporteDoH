@@ -18,6 +18,7 @@ from functools import wraps
 from socketserver import ThreadingUDPServer
 from collections import defaultdict
 from dnslib import DNSRecord, QTYPE
+from cachetools import TTLCache
 
 # 🎨 Colores para la salida en terminal
 COLOR = {
@@ -33,6 +34,7 @@ success_count = 0
 error_count = 0
 total_query_time = 0
 server_index = 0
+dns_cache = TTLCache(maxsize=1000, ttl=3600)
 config = configparser.ConfigParser()
 
 # Estadísticas para la interfaz web
@@ -293,7 +295,15 @@ class DNSProxy(socketserver.BaseRequestHandler):
         
         qname = str(request.q.qname)
         qtype = QTYPE.get(request.q.qtype, "UNKNOWN")
-
+        
+        cache_key = str(qname, qtype)
+        cache_response = dns_cache.get(cache_key)
+        if cache_response:
+            log(f"[🔍 CACHÉ] {qname} ({qtype}) servido desde caché", "SUCCESS")
+            sock.sendto(cache_response, self.client_address)
+            return
+        
+        
         if qtype == 'PTR' or qname in blocked_domains:
             log(f"[🚫 BLOQUEADO] Consulta denegada para {qname}", "WARNING")
             reply = request.reply()
