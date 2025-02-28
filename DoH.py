@@ -13,6 +13,7 @@ import threading
 import socket
 import shutil
 import subprocess
+import urllib.request
 from flask import Flask, render_template, jsonify, request
 from functools import wraps
 from socketserver import ThreadingUDPServer
@@ -93,7 +94,7 @@ def create_default_config():
         'AllowedQtypes': 'A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS'
     }
     config['Server'] = {'IP': '127.0.0.1', 'Port': '53'}
-    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True'}
+    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True', "ThreatUpdateInterval": "86400"}
     config['Logging'] = {'LogFile': 'dns_proxy.log'}
     config['Web'] = {'Username': 'admin', 'Password': 'secret'}
 
@@ -114,6 +115,13 @@ IP = config['Server']['IP']
 PORT = int(config['Server']['Port'])
 RATE_LIMIT = int(config['Security']['RateLimit'])
 BLACKLIST_FILE = config['Security']['Blacklist']
+THREAT_LIST_URLS = [
+    "https://openphish.com/feed.txt",  # Lista de phishing
+    "https://www.malwaredomainlist.com/hostslist/hosts.txt",  # Malware
+    "https://ransomwaretracker.abuse.ch/downloads/RW_DOMBL.txt"  # Ransomware
+]
+THREAT_UPDATE_INTERVAL = config.getint('Security', 'ThreatUpdateInterval', fallback=86400)  # 24 horas en segundos
+threat_domains = set()
 
 if os.path.exists(BLACKLIST_FILE):
     with open(BLACKLIST_FILE) as f:
@@ -146,6 +154,29 @@ def get_active_interface():
     except subprocess.CalledProcessError as e:
         log(f"Error al obtener interfaz activa: {e}", "ERROR")
         return None
+
+def update_threat_list():
+    global threat_domains
+    while True:
+        try:
+            new_threats = set()
+            for url in THREAT_LIST_URLS:
+                with urllib.request.urlopen(url) as response:
+                    lines = response.read().decode('utf-8').splitlines()
+                    for line in lines:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            # Extraer dominio (ignorar prefijos como "127.0.0.1" en algunas listas)
+                            domain = re.sub(r'^(127\.0\.0\.1|0\.0\.0\.0)\s+', '', line).strip()
+                            if domain:
+                                new_threats.add(domain)
+            threat_domains = new_threats
+            log(f"[🔒 THREAT] Lista de amenazas actualizada: {len(threat_domains)} dominios cargados", "SUCCESS")
+        except Exception as e:
+            log(f"[❌ THREAT] Error al actualizar lista de amenazas: {e}", "ERROR")
+        time.sleep(THREAT_UPDATE_INTERVAL)
+
+threading.Thread(target=update_threat_list, daemon=True).start()
 
 def set_windows_dns(ip, port):
     interface = get_active_interface()
@@ -305,8 +336,8 @@ class DNSProxy(socketserver.BaseRequestHandler):
             sock.sendto(cached_response, self.client_address)
             return
         
-        if qtype == 'PTR' or qname in blocked_domains:
-            log(f"[🚫 BLOQUEADO] Consulta denegada para {qname}", "WARNING")
+        if qtype == 'PTR' or qname in blocked_domains or qname in threat_domains:
+            log(f"[🚫 BLOQUEADO] Consulta denegada para {qname} (amenaza detectada)", "WARNING")
             reply = request.reply()
             reply.header.rcode = 3  # NXDOMAIN
             sock.sendto(reply.pack(), self.client_address)
@@ -332,6 +363,7 @@ class DNSProxy(socketserver.BaseRequestHandler):
                 dns_response = DNSRecord.parse(response)
                 end_time = time.time()
                 query_duration = end_time - start_time
+                ttl = min(rr.ttl for rr in dns_response.rr) if dns_response.rr else 3600
                 try:
                     validate(dns_response, request)
                     log("[🔒 DNSSEC] Respuesta validada", "SUCCESS")
@@ -347,6 +379,7 @@ class DNSProxy(socketserver.BaseRequestHandler):
                 else:
                     resolved_ip = "No IP"
                 log(f"[✅ RESPUESTA] {qname} ({qtype}) → Resolución: {resolved_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
+                dns_cache[cache_key] = response
                 sock.sendto(response, self.client_address)
             except Exception as e:
                 log(f"[❌ ERROR] No se pudo parsear respuesta DoH para {qname}: {e}", "ERROR")
@@ -650,6 +683,14 @@ def update_config():
 def apply_config():
     reload_config(None, None)  # Recarga la configuración manualmente
     return jsonify({"message": "Configuración aplicada correctamente"}), 200
+
+@app.route('/threat_stats', methods=['GET'])
+@requires_auth
+def get_threat_stats():
+    return jsonify({
+        "blocked_threats": len(threat_domains),
+        "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - THREAT_UPDATE_INTERVAL))
+    })
 
 # Función para iniciar Flask
 def run_flask():
