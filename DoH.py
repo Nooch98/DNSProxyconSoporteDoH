@@ -9,10 +9,13 @@ import platform
 import psutil
 import signal
 import configparser
+import cryptography
+import random
 import threading
 import socket
 import shutil
 import subprocess
+import ipaddress
 import urllib.request
 from flask import Flask, render_template, jsonify, request
 from functools import wraps
@@ -55,38 +58,42 @@ def show_help():
 
 {COLOR['BOLD']}{COLOR['INFO']}📌 ¿Qué hace este script?{COLOR['RESET']}
   - {COLOR['CYAN']}Este servidor DNS Proxy intercepta consultas DNS y las redirige a servidores DoH (DNS sobre HTTPS).{COLOR['RESET']}
-  - {COLOR['CYAN']}El objetivo es mejorar la privacidad y evitar bloqueos de los ISP.{COLOR['RESET']}
+  - {COLOR['CYAN']}El objetivo es mejorar la privacidad, evitar bloqueos de ISP y proteger contra amenazas en red.{COLOR['RESET']}
 
 {COLOR['BOLD']}🛠️ ¿Cómo funciona?{COLOR['RESET']}
   {COLOR['INFO']}✔ Recibe consultas DNS en {COLOR['UNDERLINE']}{IP}:{PORT}{COLOR['RESET']}.
-  {COLOR['INFO']}✔ Convierte las consultas a DNS sobre HTTPS (DoH).
-  {COLOR['INFO']}✔ Envía las consultas a los servidores DoH configurados en config.ini.
-  {COLOR['INFO']}✔ Responde con la IP resuelta al cliente que hizo la consulta.
+  {COLOR['INFO']}✔ Convierte las consultas a DNS sobre HTTPS (DoH) con validación DNSSEC.{COLOR['RESET']}
+  {COLOR['INFO']}✔ Usa caché local para respuestas rápidas y envía consultas a servidores DoH configurados.{COLOR['RESET']}
+  {COLOR['INFO']}✔ Responde con IPs resueltas, limitando tamaño para evitar amplificación.{COLOR['RESET']}
 
 {COLOR['BOLD']}🔧 Configuración:{COLOR['RESET']}
-  {COLOR['GRAY']}🛠️ Para personalizar el servidor, edita el archivo {COLOR['BOLD']}config.ini{COLOR['RESET']}{COLOR['GRAY']}:{COLOR['RESET']}
-    - Servidores DoH → [DNS] Servers=https://dns.google/dns-query,https://cloudflare-dns.com/dns-query
-    - Tipos de consultas permitidos → [DNS] AllowedQtypes=A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS
-    - IP y puerto del proxy → [Server] IP=127.0.0.1  Port=53
-  {COLOR['WARNING']}⚠️ Si no existe config.ini, se genera automáticamente con valores predeterminados.{COLOR['RESET']}
+  {COLOR['GRAY']}🛠️ Personaliza el servidor editando {COLOR['BOLD']}config.ini{COLOR['RESET']}{COLOR['GRAY']}:{COLOR['RESET']}
+    - {COLOR['INFO']}Servidores DoH → [DNS] Servers=https://1.1.1.1/dns-query,https://8.8.8.8/dns-query{COLOR['RESET']}
+    - {COLOR['INFO']}Tipos permitidos → [DNS] AllowedQtypes=A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS{COLOR['RESET']}
+    - {COLOR['INFO']}IP y puerto → [Server] IP=0.0.0.0 Port=53 (0.0.0.0 para VPS público){COLOR['RESET']}
+    - {COLOR['INFO']}Seguridad → [Security] RateLimit=10 Blacklist=blocked_domains.txt StealthMode=True{COLOR['RESET']}
+    - {COLOR['INFO']}Redes permitidas → [Security] AllowedNetworks= (vacío para acceso público, ej. 127.0.0.1/32 para local){COLOR['RESET']}
+    - {COLOR['INFO']}Anti-amplificación → [Security] MaxResponseSize=512 EnableAntiAmplification=True{COLOR['RESET']}
+  {COLOR['WARNING']}⚠️ Si no existe config.ini, se genera con valores predeterminados.{COLOR['RESET']}
+  {COLOR['SUCCESS']}🔄 Cambios aplicados en caliente al modificar config.ini.{COLOR['RESET']}
 
 {COLOR['BOLD']}📊 Características:{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Soporta consultas A, AAAA, CNAME, MX, TXT, NS, SOA, HTTPS.{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Registro detallado de logs en dns_proxy.log.{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Intentos de reenvío automáticos en caso de fallo.{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Protección contra consultas DNS maliciosas o bloqueadas.{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Soporta A, AAAA, CNAME, MX, TXT, NS, SOA, HTTPS con DNSSEC.{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Caché local para mejorar rendimiento (1000 entradas, TTL 1 hora).{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Registro detallado en dns_proxy.log.{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Reintentos automáticos ante fallos.{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Protección contra DNS malicioso y amplificación (ideal para VPS públicos).{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Configuración dinámica sin reinicio.{COLOR['RESET']}
 
 {COLOR['BOLD']}📝 Comandos disponibles:{COLOR['RESET']}
   {COLOR['INFO']}💡 Iniciar el servidor DNS Proxy:{COLOR['RESET']}  
-      {COLOR['BOLD']}{COLOR['CYAN']}python script.py{COLOR['RESET']}
-  
+      {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py{COLOR['RESET']}
   {COLOR['INFO']}ℹ️ Mostrar esta ayuda:{COLOR['RESET']}  
-      {COLOR['BOLD']}{COLOR['CYAN']}python script.py --help{COLOR['RESET']}
+      {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --help{COLOR['RESET']}
 
 {COLOR['SUCCESS']}═══════════════════════════════════════════════════════════════════════════════════════{COLOR['RESET']}
 """
     print(help_text)
-
 
 def create_default_config():
     config['DNS'] = {
@@ -94,7 +101,7 @@ def create_default_config():
         'AllowedQtypes': 'A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS'
     }
     config['Server'] = {'IP': '127.0.0.1', 'Port': '53'}
-    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True', "ThreatUpdateInterval": "86400"}
+    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True', "ThreatUpdateInterval": "86400", 'AllowedNetworks': '', 'MaxResponseSize': '512', 'EnableAntiAmplification': 'True'}
     config['Logging'] = {'LogFile': 'dns_proxy.log'}
     config['Web'] = {'Username': 'admin', 'Password': 'secret'}
 
@@ -122,6 +129,10 @@ THREAT_LIST_URLS = [
 ]
 THREAT_UPDATE_INTERVAL = config.getint('Security', 'ThreatUpdateInterval', fallback=86400)  # 24 horas en segundos
 threat_domains = set()
+ALLOWED_NETWORKS = config.get('Security', 'AllowedNetworks', fallback='').split(',')
+ALLOWED_NETWORKS = [ipaddress.ip_network(net.strip()) for net in ALLOWED_NETWORKS if net.strip()] if ALLOWED_NETWORKS[0] else []
+MAX_RESPONSE_SIZE = config.getint('Security', 'MaxResponseSize', fallback=512)
+ENABLE_ANTI_AMPLIFICATION = config.getboolean('Security', 'EnableAntiAmplification', fallback=True)
 
 if os.path.exists(BLACKLIST_FILE):
     with open(BLACKLIST_FILE) as f:
@@ -267,7 +278,7 @@ def cargar_ips_bloqueadas():
 
 def send_doh_request(doh_query, headers, retries=3, delay=2):
     global success_count, error_count, total_query_time
-
+    
     for server in DOH_SERVERS:
         for attempt in range(retries):
             try:
@@ -276,25 +287,20 @@ def send_doh_request(doh_query, headers, retries=3, delay=2):
                 elapsed_time = time.time() - start_time
                 total_query_time += elapsed_time
                 server_latencies[server] = elapsed_time
-
                 if response.status_code == 200:
                     success_count += 1
+                    log(f"[🔍 DoH] Respuesta exitosa desde {server}", "INFO")
                     return response.content
-                elif response.status_code == 403 and STEALTH_MODE:
-                    log(f"[🚨 STEALTH] {server} bloqueado, eliminando...", "WARNING")
-                    with latency_lock:
-                        DOH_SERVERS.remove(server)
-                        del server_latencies[server]
-                    if not DOH_SERVERS:
-                        log("[⛔ ERROR] No quedan servidores DoH disponibles.", "ERROR")
-                        return None
+                else:
+                    log(f"[⚠️ DoH] Respuesta no válida desde {server} (código: {response.status_code})", "WARNING")
             except requests.RequestException as e:
                 log(f"[❌ DoH] Error al conectar a {server} (intento {attempt + 1}/{retries}): {e}", "ERROR")
                 server_latencies[server] = float('inf')
-
-        time.sleep(delay)
+            time.sleep(delay)
+        log(f"[❌ DoH] Fallo con {server} tras todos los intentos", "WARNING")
     
     error_count += 1
+    log("[❌ DoH] Fallo tras intentar todos los servidores. Posible fuga DNS al ISP.", "ERROR")
     return None
 
 blocked_ips = cargar_ips_bloqueadas()
@@ -309,6 +315,14 @@ class DNSProxy(socketserver.BaseRequestHandler):
     def handle(self):
         client_ip = self.client_address[0]
         query_count[client_ip] += 1
+        
+        if ALLOWED_NETWORKS:
+            client_ip_obj = ipaddress.ip_address(client_ip)
+            if not any(client_ip_obj in net for net in ALLOWED_NETWORKS):
+                log(f"[🚫 SEGURIDAD] Consulta rechazada desde IP no autorizada: {client_ip}", "WARNING")
+                return
+        
+        
         
         if client_ip in blocked_ips:
             log(f"[⛔ BLOQUEADO] {client_ip} intentó conectarse", "WARNING")
@@ -379,8 +393,14 @@ class DNSProxy(socketserver.BaseRequestHandler):
                 else:
                     resolved_ip = "No IP"
                 log(f"[✅ RESPUESTA] {qname} ({qtype}) → Resolución: {resolved_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
-                dns_cache[cache_key] = response
-                sock.sendto(response, self.client_address)
+                response_data = dns_response.pack()
+                
+                if ENABLE_ANTI_AMPLIFICATION and len(response_data) > MAX_RESPONSE_SIZE:
+                    log(f"[⚠️ SEGURIDAD] Respuesta para {qname} truncada (tamaño: {len(response_data)} > {MAX_RESPONSE_SIZE})", "WARNING")
+                    response_data = response_data[:MAX_RESPONSE_SIZE]
+                
+                dns_cache[cache_key] = response_data
+                sock.sendto(response_data, self.client_address)
             except Exception as e:
                 log(f"[❌ ERROR] No se pudo parsear respuesta DoH para {qname}: {e}", "ERROR")
                 # Enviar la respuesta tal cual si es válida, o NXDOMAIN si falla
@@ -692,6 +712,20 @@ def get_threat_stats():
         "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - THREAT_UPDATE_INTERVAL))
     })
 
+@app.route('/dns_leak_test', methods=['GET'])
+@requires_auth
+def dns_leak_test():
+    try:
+        servers = DOH_SERVERS
+        return jsonify({
+            "message": "Prueba de fuga DNS: las consultas están siendo enrutadas a los siguientes servidores DoH.",
+            "configured_servers": servers,
+            "recommendation": "Visita dnsleaktest.com para una prueba completa desde tu navegador."
+        })
+    except Exception as e:
+        log(f"[❌ ERROR] Error al generar prueba de fuga DNS: {e}", "ERROR")
+        return jsonify({"error": f"Error al generar prueba: {str(e)}"}), 500
+
 # Función para iniciar Flask
 def run_flask():
     while flask_app_running:
@@ -731,6 +765,8 @@ def reload_config(signal, frame):
     
 def start_dns_server():
     global server, server_thread
+    if IP == '0.0.0.0' and not ALLOWED_NETWORKS:
+        log("[⚠️ SEGURIDAD] El servidor está escuchando en 0.0.0.0 sin restricciones de red. Considera configurar AllowedNetworks en config.ini para mayor seguridad.", "WARNING")
     server = socketserver.ThreadingUDPServer((IP, PORT), DNSProxy)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
