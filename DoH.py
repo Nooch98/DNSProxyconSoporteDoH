@@ -18,6 +18,8 @@ from functools import wraps
 from socketserver import ThreadingUDPServer
 from collections import defaultdict
 from dnslib import DNSRecord, QTYPE
+from cachetools import TTLCache
+from dns.dnssec import validate
 
 # 🎨 Colores para la salida en terminal
 COLOR = {
@@ -33,6 +35,7 @@ success_count = 0
 error_count = 0
 total_query_time = 0
 server_index = 0
+dns_cache = TTLCache(maxsize=1000, ttl=3600)
 config = configparser.ConfigParser()
 
 # Estadísticas para la interfaz web
@@ -294,6 +297,14 @@ class DNSProxy(socketserver.BaseRequestHandler):
         qname = str(request.q.qname)
         qtype = QTYPE.get(request.q.qtype, "UNKNOWN")
         
+        cache_key = f"{qname}:{qtype}"
+        cached_response = dns_cache.get(cache_key)
+        
+        if cached_response:
+            log(f"[🔍 CACHÉ] {qname} ({qtype}) servido desde caché", "SUCCESS")
+            sock.sendto(cached_response, self.client_address)
+            return
+        
         if qtype == 'PTR' or qname in blocked_domains:
             log(f"[🚫 BLOQUEADO] Consulta denegada para {qname}", "WARNING")
             reply = request.reply()
@@ -321,6 +332,11 @@ class DNSProxy(socketserver.BaseRequestHandler):
                 dns_response = DNSRecord.parse(response)
                 end_time = time.time()
                 query_duration = end_time - start_time
+                try:
+                    validate(dns_response, request)
+                    log("[🔒 DNSSEC] Respuesta validada", "SUCCESS")
+                except Exception as e:
+                    log(f"[⚠️ DNSSEC] Validación fallida para {qname}: {e}", "WARNING")
                 # Manejar diferentes tipos de respuesta
                 if qtype == 'A' and dns_response.get_a():
                     resolved_ip = str(dns_response.get_a().rdata)
@@ -609,25 +625,31 @@ def remove_from_blacklist():
         return jsonify({"message": f"{domain} eliminado de la lista negra"}), 200
     return jsonify({"error": "Dominio no encontrado"}), 404
 
-@app.route('/reload_config', methods=['POST'])
+@app.route('/config_ini', methods=['PATCH'])
 @requires_auth
-def reload_config_endpoint():
-    reload_config(None, None)
-    return jsonify({"message": "Configuración recargada correctamente"}), 200
-
-# Función para recargar configuración
-def reload_config(signal, frame):
-    global config, blocked_domains, DOH_SERVERS, ALLOWED_QTYPES, RATE_LIMIT
-    config.read('config.ini')
-    DOH_SERVERS = config['DNS']['Servers'].split(',')
-    ALLOWED_QTYPES = config['DNS']['AllowedQtypes'].split(',')
-    RATE_LIMIT = int(config['Security']['RateLimit'])
-    if os.path.exists(config['Security']['Blacklist']):
-        with open(config['Security']['Blacklist']) as f:
-            blocked_domains.clear()
-            blocked_domains.update(line.strip() for line in f if line.strip())
-    log("🔄 Configuración recargada.", "SUCCESS")
+def update_config():
+    global config
+    data = request.json
+    for key, value in data.items():
+        if key in ['doh_servers', 'allowed_qtypes']:
+            config['DNS'][key.replace('_', '')] = ','.join(value) if isinstance(value, list) else value
+        elif key in ['server_ip', 'server_port']:
+            config['Server'][key.replace('server_', '').capitalize()] = str(value)
+        elif key == 'rate_limit':
+            config['Security']['RateLimit'] = str(value)
+        elif key == 'blacklist_file':
+            config['Security']['Blacklist'] = value
     
+    with open('config.ini', 'w') as configfile:
+        config.write(configfile)
+
+    return jsonify({"message": "Configuración guardada, pero no aplicada aún"}), 200
+
+@app.route('/apply_config', methods=['POST'])
+@requires_auth
+def apply_config():
+    reload_config(None, None)  # Recarga la configuración manualmente
+    return jsonify({"message": "Configuración aplicada correctamente"}), 200
 
 # Función para iniciar Flask
 def run_flask():
