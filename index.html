@@ -196,6 +196,8 @@
             <button class="button" onclick="reloadConfig()">Recargar Configuración</button>
             <button class="button" onclick="restartServer()">Reiniciar Servidor</button>
             <button class="button" onclick="stopServer()">Detener Servidor</button>
+            <button class="button" onclick="runDnsLeakTest()">Prueba de Fuga DNS</button>
+            <div id="dns-leak-result" class="card" style="display: none;"></div>
             <div id="stats-error" class="alert alert-error" style="display: none;"></div>
         </div>
 
@@ -215,6 +217,7 @@
                 </table>
             </div>
             <div id="config-error" class="alert alert-error" style="display: none;"></div>
+            <button class="button" onclick="applyConfig()">Aplicar Cambios</button>
         </div>
 
         <div id="logs-content" class="tab-content" role="tabpanel">
@@ -497,6 +500,37 @@
                 })
                 .catch(err => showToast(`Error al actualizar estadísticas del sistema: ${err}`, 'error'));
         }, 2000);
+
+        function applyConfig() {
+            fetch('/apply_config', {
+                method: 'POST',
+                headers: { 'Authorization': 'Basic ' + btoa('admin:secret') }
+            })
+            .then(response => response.json())
+            .then(data => showToast(data.message, 'success'))
+            .catch(err => showToast(`Error al aplicar cambios: ${err}`, 'error'));
+        };
+
+        function runDNSLeakTest() {
+            fetch('/dns_leak_test', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
+                .then(response => response.json())
+                .then(data => {
+                    const resultDiv = document.getElementById('dns-leak-result');
+                    resultDiv.style.display = 'block';
+                    resultDiv.innerHTML = `
+                        <h3>Resultado de la Prueba de Fugas DNS</h3>
+                        <p>${data.message}</p>
+                        <p>Servidores Configurados: ${data.configured_servers.join(', ')}</p>
+                        <p>${data.recommendation}</p>
+                    `;
+                    showToast('Prueba de fugas DNS completada', 'success');
+                })
+                .catch(err => {
+                    showToast(`Error al realizar la prueba de fugas DNS: ${err}`, 'error');
+                    document.getElementById('dns-leak-result').style.display = 'block';
+                    document.getElementById('dns-leak-result').innerHTML = `<p>Error: ${err}</p>`;
+                });
+        };
 
         setInterval(() => {
             updateBlacklist();
