@@ -102,6 +102,7 @@ def create_default_config():
     }
     config['Server'] = {'IP': '127.0.0.1', 'Port': '53'}
     config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True', "ThreatUpdateInterval": "86400", 'AllowedNetworks': '', 'MaxResponseSize': '512', 'EnableAntiAmplification': 'True'}
+    config['AdBlocking'] = {'EnableAdBlocking': 'False', 'AdBlockLists': 'https://easylist.to/easylist/easylist.txt', 'UpdateInterval': '86400'}
     config['Logging'] = {'LogFile': 'dns_proxy.log'}
     config['Web'] = {'Username': 'admin', 'Password': 'secret'}
 
@@ -133,6 +134,10 @@ ALLOWED_NETWORKS = config.get('Security', 'AllowedNetworks', fallback='').split(
 ALLOWED_NETWORKS = [ipaddress.ip_network(net.strip()) for net in ALLOWED_NETWORKS if net.strip()] if ALLOWED_NETWORKS[0] else []
 MAX_RESPONSE_SIZE = config.getint('Security', 'MaxResponseSize', fallback=512)
 ENABLE_ANTI_AMPLIFICATION = config.getboolean('Security', 'EnableAntiAmplification', fallback=True)
+ENABLE_AD_BLOCKING = config.getboolean('AdBlocking', 'EnableAdBlocking', fallback=False)
+AD_BLOCK_LISTS = config.get('AdBlocking', 'AdBlockLists', fallback='https://easylist.to/easylist/easylist.txt').split(',')
+AD_BLOCK_UPDATE_INTERVAL = config.getint('AdBlocking', 'UpdateInterval', fallback=86400)
+ad_block_domains = set()
 
 if os.path.exists(BLACKLIST_FILE):
     with open(BLACKLIST_FILE) as f:
@@ -171,24 +176,64 @@ def update_threat_list():
     while True:
         try:
             new_threats = set()
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             for url in THREAT_LIST_URLS:
-                with urllib.request.urlopen(url) as response:
-                    lines = response.read().decode('utf-8').splitlines()
-                    for line in lines:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            # Extraer dominio (ignorar prefijos como "127.0.0.1" en algunas listas)
-                            domain = re.sub(r'^(127\.0\.0\.1|0\.0\.0\.0)\s+', '', line).strip()
-                            if domain:
-                                new_threats.add(domain)
+                try:
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req) as response:
+                        lines = response.read().decode('utf-8').splitlines()
+                        for line in lines:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                domain = re.sub(r'^(127\.0\.0\.1|0\.0\.0\.0)\s+', '', line).strip()
+                                if domain:
+                                    new_threats.add(domain)
+                except urllib.error.HTTPError as e:
+                    log(f"[❌ THREAT] Error HTTP al obtener {url}: {e}", "ERROR")
+                except Exception as e:
+                    log(f"[❌ THREAT] Error al procesar {url}: {e}", "ERROR")
             threat_domains = new_threats
             log(f"[🔒 THREAT] Lista de amenazas actualizada: {len(threat_domains)} dominios cargados", "SUCCESS")
         except Exception as e:
-            log(f"[❌ THREAT] Error al actualizar lista de amenazas: {e}", "ERROR")
+            log(f"[❌ THREAT] Error general al actualizar lista de amenazas: {e}", "ERROR")
         time.sleep(THREAT_UPDATE_INTERVAL)
 
 threading.Thread(target=update_threat_list, daemon=True).start()
 
+def update_adblock_list():
+    global ad_block_domains, ENABLE_AD_BLOCKING, AD_BLOCK_LISTS, AD_BLOCK_UPDATE_INTERVAL
+    while True:
+        if not ENABLE_AD_BLOCKING:  # Respetar el estado dinámico
+            time.sleep(60)  # Dormir si está desactivado, revisando cada minuto
+            continue
+        
+        try:
+            new_adblocks = set()
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            for url in AD_BLOCK_LISTS:
+                try:
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req) as response:
+                        lines = response.read().decode("utf-8").splitlines()
+                        for line in lines:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                domain = re.sub(r'^(127\.0\.0\.1|0\.0\.0\.0)\s+', '', line).strip()
+                                if domain and re.match(r'^[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', domain):
+                                    new_adblocks.add(domain)
+                except urllib.error.HTTPError as e:
+                    log(f"[❌ ADBLOCK] Error HTTP al obtener {url}: {e}", "ERROR")
+                except Exception as e:
+                    log(f"[❌ ADBLOCK] Error al procesar {url}: {e}", "ERROR")
+            ad_block_domains = new_adblocks  # Asignar fuera del bucle
+            log(f"[🔒 ADBLOCK] Lista de anuncios/rastreadores actualizada: {len(ad_block_domains)} dominios cargados", "SUCCESS")
+        except Exception as e:
+            log(f"[❌ ADBLOCK] Error general al actualizar lista de anuncios: {e}", "ERROR")
+        time.sleep(AD_BLOCK_UPDATE_INTERVAL)
+
+if ENABLE_AD_BLOCKING:
+    threading.Thread(target=update_adblock_list, daemon=True).start()
+                                
 def set_windows_dns(ip, port):
     interface = get_active_interface()
     if not interface:
@@ -348,6 +393,13 @@ class DNSProxy(socketserver.BaseRequestHandler):
         if cached_response:
             log(f"[🔍 CACHÉ] {qname} ({qtype}) servido desde caché", "SUCCESS")
             sock.sendto(cached_response, self.client_address)
+            return
+        
+        if ENABLE_AD_BLOCKING and qname in ad_block_domains:
+            log(f"[🚫 ADBLOCK] Consulta bloqueada para {qname} (anuncio/rastreador)", "WARNING")
+            reply = request.reply()
+            reply.header.rcode = 3 # NXDOMAIN
+            sock.sendto(reply.pack(), self.client_address)
             return
         
         if qtype == 'PTR' or qname in blocked_domains or qname in threat_domains:
@@ -588,6 +640,15 @@ def get_stats():
         "blocked_domains_count": len(blocked_domains),
     }
     return jsonify(stats_data)
+
+@app.route('/adblock_stats', methods=['GET'])
+@requires_auth
+def get_adblock_stats():
+    return jsonify({
+    "enabled": ENABLE_AD_BLOCKING,
+    "blocked_ad_domains": len(ad_block_domains),
+    "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - AD_BLOCK_UPDATE_INTERVAL))
+    })
 
 # Ruta para configuración
 @app.route('/config_ini', methods=['GET', 'PATCH'])
