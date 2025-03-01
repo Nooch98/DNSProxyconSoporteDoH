@@ -11,6 +11,7 @@ Un servidor proxy DNS diseñado para evitar bloqueos de ISP, como el de Movistar
 
 - **DNS over HTTPS (DoH)**: Convierte consultas DNS tradicionales (UDP/53) en solicitudes HTTPS cifradas.
 - **Evitar Bloqueos de ISP**: Soporte para múltiples servidores DoH (Cloudflare, Google, etc.), rotación de IPs alternativas(En Proceso), y túneles TLS con `stunnel`.
+- **Bloqueador de anuncios**: Bloquea dominios de anuncios conocidos para evitar anuncios.
 - **Interfaz Web**: Dashboard en tiempo real con estadísticas, configuración editable(En Proceso), logs, y gestión de lista negra.
 - **Configuración Automática de DNS**: Configura los DNS de Windows para usar el proxy local y los restaura al cerrar.
 - **Seguridad**: Protección contra DNS tunneling, límites de tasa, y lista negra de dominios.
