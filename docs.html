@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentación - Servidor DNS</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { display: flex; font-family: Arial, sans-serif; background: #f8f9fa; transition: background 0.3s, color 0.3s; }
+        
+        /* Modo oscuro */
+        body.dark-mode { background: #121212; color: #eaeaea; }
+        body.dark-mode .sidebar { background: #222; }
+        body.dark-mode .sidebar a { color: #ddd; }
+        body.dark-mode .sidebar a:hover { background: #007bff; }
+        body.dark-mode pre { background: #333; }
+
+        /* Menú lateral */
+        .sidebar {
+            width: 250px;
+            background: #343a40;
+            color: white;
+            height: 100vh;
+            padding: 20px;
+            position: fixed;
+            overflow-y: auto;
+        }
+        .sidebar h2 { font-size: 1.2em; margin-bottom: 20px; }
+        .sidebar ul { list-style: none; padding: 0; }
+        .sidebar li { margin: 10px 0; }
+        .sidebar a {
+            color: white; text-decoration: none; display: block;
+            padding: 10px; border-radius: 5px; transition: background 0.3s;
+        }
+        .sidebar a:hover { background: #007bff; }
+
+        /* Switch modo oscuro */
+        .toggle-container {
+            display: flex; align-items: center; margin-top: 20px;
+        }
+        .toggle-label { margin-left: 10px; font-size: 0.9em; }
+        .toggle-switch {
+            position: relative; width: 40px; height: 20px;
+            background: #ddd; border-radius: 20px;
+            cursor: pointer; transition: background 0.3s;
+        }
+        .toggle-switch:before {
+            content: ""; position: absolute; width: 18px; height: 18px;
+            background: white; border-radius: 50%; top: 1px; left: 1px;
+            transition: transform 0.3s;
+        }
+        body.dark-mode .toggle-switch { background: #007bff; }
+        body.dark-mode .toggle-switch:before { transform: translateX(20px); }
+
+        /* Contenido principal */
+        .content {
+            margin-left: 270px;
+            padding: 20px;
+            max-width: 800px;
+        }
+        h1 { color: #007bff; }
+        img { max-width: 100%; border-radius: 5px; }
+        pre { background: #222; color: #fff; padding: 10px; border-radius: 5px; overflow-x: auto; }
+        code { background: #eee; padding: 2px 4px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>📖 Documentación</h2>
+        <ul>
+            <li><a href="#" onclick="loadMarkdown(event, 'introduccion.md')">Introducción</a></li>
+            <li><a href="#" onclick="loadMarkdown(event, 'configuracion.md')">Configuración</a></li>
+            <li><a href="#" onclick="loadMarkdown(event, 'uso.md')">Uso</a></li>
+            <li><a href="#" onclick="loadMarkdown(event, 'seguridad.md')">Seguridad</a></li>
+        </ul>
+        
+        <!-- Modo oscuro/claro -->
+        <div class="toggle-container">
+            <div class="toggle-switch" onclick="toggleDarkMode()"></div>
+            <span class="toggle-label">Modo Oscuro</span>
+        </div>
+    </div>
+
+    <div class="content">
+        <div id="markdown-content">📄 Cargando documentación...</div>
+    </div>
+
+    <script>
+        function loadMarkdown(event, file) {
+            if (event) event.preventDefault();  // Evita recargar la página
+            
+            fetch('/' + file)  // Busca en la misma carpeta del servidor
+                .then(response => {
+                    if (!response.ok) throw new Error("Archivo no encontrado");
+                    return response.text();
+                })
+                .then(text => {
+                    document.getElementById('markdown-content').innerHTML = marked.parse(text);
+                })
+                .catch(error => {
+                    console.error('Error cargando la documentación:', error);
+                    document.getElementById('markdown-content').innerHTML = "<p>Error al cargar el archivo.</p>";
+                });
+        }
+
+        // Cargar la introducción por defecto al abrir la página
+        document.addEventListener("DOMContentLoaded", () => {
+            loadMarkdown(null, 'introduccion.md');
+        });
+
+        // Alternar modo oscuro/claro
+        function toggleDarkMode() {
+            document.body.classList.toggle("dark-mode");
+            localStorage.setItem("dark-mode", document.body.classList.contains("dark-mode"));
+        }
+
+        // Mantener el modo seleccionado entre visitas
+        if (localStorage.getItem("dark-mode") === "true") {
+            document.body.classList.add("dark-mode");
+        }
+    </script>
+</body>
+</html>
