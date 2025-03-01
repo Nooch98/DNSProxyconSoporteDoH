@@ -367,8 +367,6 @@ class DNSProxy(socketserver.BaseRequestHandler):
                 log(f"[🚫 SEGURIDAD] Consulta rechazada desde IP no autorizada: {client_ip}", "WARNING")
                 return
         
-        
-        
         if client_ip in blocked_ips:
             log(f"[⛔ BLOQUEADO] {client_ip} intentó conectarse", "WARNING")
             return
@@ -384,24 +382,25 @@ class DNSProxy(socketserver.BaseRequestHandler):
             log(f"[❌ ERROR] No se pudo parsear solicitud DNS desde {client_ip}: {e}", "ERROR")
             return
         
-        qname = str(request.q.qname)
+        qname = str(request.q.qname).rstrip('.')  # Eliminar el punto final para consistencia
         qtype = QTYPE.get(request.q.qtype, "UNKNOWN")
+
         
-        cache_key = f"{qname}:{qtype}"
-        cached_response = dns_cache.get(cache_key)
-        
-        if cached_response:
-            log(f"[🔍 CACHÉ] {qname} ({qtype}) servido desde caché", "SUCCESS")
-            sock.sendto(cached_response, self.client_address)
-            return
-        
+        # Bloqueo de anuncios
         if ENABLE_AD_BLOCKING and qname in ad_block_domains:
             log(f"[🚫 ADBLOCK] Consulta bloqueada para {qname} (anuncio/rastreador)", "WARNING")
             reply = request.reply()
-            reply.header.rcode = 3 # NXDOMAIN
-            sock.sendto(reply.pack(), self.client_address)
+            reply.header.rcode = 3  # NXDOMAIN
+            response_data = reply.pack()
+            log(f"[DEBUG] Enviando NXDOMAIN para {qname} - Tamaño: {len(response_data)} bytes", "INFO")
+            try:
+                sock.sendto(response_data, self.client_address)
+                log(f"[DEBUG] NXDOMAIN enviado exitosamente para {qname}", "INFO")
+            except Exception as e:
+                log(f"[❌ ERROR] Fallo al enviar NXDOMAIN para {qname}: {e}", "ERROR")
             return
         
+        # Bloqueo de dominios amenazantes o PTR
         if qtype == 'PTR' or qname in blocked_domains or qname in threat_domains:
             log(f"[🚫 BLOQUEADO] Consulta denegada para {qname} (amenaza detectada)", "WARNING")
             reply = request.reply()
@@ -411,19 +410,30 @@ class DNSProxy(socketserver.BaseRequestHandler):
 
         if qtype not in ALLOWED_QTYPES:
             log(f"[🚫 IGNORADO] Tipo {qtype} no permitido para {qname}", "WARNING")
+            reply = request.reply()
+            reply.header.rcode = 3  # NXDOMAIN
+            sock.sendto(reply.pack(), self.client_address)
             return
         
         if qtype == 'TXT' and len(data) > 300:
             bloquear_ip(client_ip)
             return
 
+        cache_key = f"{qname}:{qtype}"
+        cached_response = dns_cache.get(cache_key)
+        
+        if cached_response:
+            log(f"[🔍 CACHÉ] {qname} ({qtype}) servido desde caché", "SUCCESS")
+            sock.sendto(cached_response, self.client_address)
+            return
+        
         start_time = time.time()
         log(f"[🔍 CONSULTA] {qname} ({qtype}) de {client_ip}", "INFO")
 
         doh_query = request.pack()
         headers = {"Accept": "application/dns-message", "Content-Type": "application/dns-message"}
-
         response = send_doh_request(doh_query, headers, retries=3)
+        
         if response:
             try:
                 dns_response = DNSRecord.parse(response)
@@ -435,7 +445,7 @@ class DNSProxy(socketserver.BaseRequestHandler):
                     log("[🔒 DNSSEC] Respuesta validada", "SUCCESS")
                 except Exception as e:
                     log(f"[⚠️ DNSSEC] Validación fallida para {qname}: {e}", "WARNING")
-                # Manejar diferentes tipos de respuesta
+                
                 if qtype == 'A' and dns_response.get_a():
                     resolved_ip = str(dns_response.get_a().rdata)
                 elif qtype == 'AAAA' and any(r.rtype == QTYPE.AAAA for r in dns_response.rr):
@@ -444,6 +454,7 @@ class DNSProxy(socketserver.BaseRequestHandler):
                     resolved_ip = "HTTPS Record"
                 else:
                     resolved_ip = "No IP"
+                
                 log(f"[✅ RESPUESTA] {qname} ({qtype}) → Resolución: {resolved_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
                 response_data = dns_response.pack()
                 
@@ -455,9 +466,8 @@ class DNSProxy(socketserver.BaseRequestHandler):
                 sock.sendto(response_data, self.client_address)
             except Exception as e:
                 log(f"[❌ ERROR] No se pudo parsear respuesta DoH para {qname}: {e}", "ERROR")
-                # Enviar la respuesta tal cual si es válida, o NXDOMAIN si falla
                 if response:
-                    sock.sendto(response, self.client_address)
+                    sock.sendto(response[:MAX_RESPONSE_SIZE] if ENABLE_ANTI_AMPLIFICATION else response, self.client_address)
                 else:
                     reply = request.reply()
                     reply.header.rcode = 3  # NXDOMAIN
@@ -467,7 +477,6 @@ class DNSProxy(socketserver.BaseRequestHandler):
         end_time = time.time()
         query_duration = end_time - start_time
         log(f"[❌ FALLÓ] No se pudo resolver {qname} - Tiempo: {query_duration:.4f}s", "ERROR")
-        # Enviar NXDOMAIN como fallback si falla DoH
         reply = request.reply()
         reply.header.rcode = 3  # NXDOMAIN
         sock.sendto(reply.pack(), self.client_address)
@@ -638,17 +647,11 @@ def get_stats():
         "error_count": error_count,
         "avg_time": total_query_time / success_count if success_count else 0,
         "blocked_domains_count": len(blocked_domains),
+        "enabled": ENABLE_AD_BLOCKING,
+        "blocked_ad_domains": len(ad_block_domains),
+        "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - AD_BLOCK_UPDATE_INTERVAL))
     }
     return jsonify(stats_data)
-
-@app.route('/adblock_stats', methods=['GET'])
-@requires_auth
-def get_adblock_stats():
-    return jsonify({
-    "enabled": ENABLE_AD_BLOCKING,
-    "blocked_ad_domains": len(ad_block_domains),
-    "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - AD_BLOCK_UPDATE_INTERVAL))
-    })
 
 # Ruta para configuración
 @app.route('/config_ini', methods=['GET', 'PATCH'])
