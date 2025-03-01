@@ -177,8 +177,8 @@
             </div>
             <div id="stats-table" class="card">
                 <table class="stats-table">
-                    <thead><tr><th>Total Consultas</th><th>Consultas Exitosas</th><th>Consultas Fallidas</th><th>Tiempo Promedio</th><th>Dominios Bloqueados</th></tr></thead>
-                    <tbody><tr><td id="total_queries">0</td><td id="success_count">0</td><td id="error_count">0</td><td id="avg_time">0 ms</td><td id="blocked_domains_count">0</td></tr></tbody>
+                    <thead><tr><th>Total Consultas</th><th>Consultas Exitosas</th><th>Consultas Fallidas</th><th>Tiempo Promedio</th><th>Dominios Bloqueados</th><th>AD Block</th></tr></thead>
+                    <tbody><tr><td id="total_queries">0</td><td id="success_count">0</td><td id="error_count">0</td><td id="avg_time">0 ms</td><td id="blocked_domains_count">0</td><td id="blocked_ad_domains">0</td>/td></tr></tbody>
                 </table>
             </div>
             <div class="card">
@@ -284,7 +284,8 @@
             document.getElementById('error_count').textContent = data.error_count;
             document.getElementById('avg_time').textContent = `${data.avg_time.toFixed(3)} ms`;
             document.getElementById('blocked_domains_count').textContent = data.blocked_domains_count;
-            statsChart.data.datasets[0].data = [data.success_count, data.error_count, data.blocked_domains_count];
+            document.getElementById('blocked_ad_domains').textContent = data.blocked_ad_domains || 0;
+            statsChart.data.datasets[0].data = [data.success_count, data.error_count, data.blocked_domains_count, data.blocked_ad_domains];
             statsChart.update();
             document.getElementById('stats-error').style.display = 'none';
         });
