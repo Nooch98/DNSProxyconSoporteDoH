@@ -92,7 +92,7 @@ El archivo `config.ini` permite personalizar el comportamiento del proxy. Si no 
 
 ```ini
 [DNS]
-Servers=https://cloudflare-dns.com/dns-query,https://dns.google/dns-query
+Servers=[https://cloudflare-dns.com/dns-query,https://dns.google/dns-query](https://8.8.8.8/dns-query,https://1.1.1.1/dns-query,https://9.9.9.9/dns-query)
 AllowedQtypes=A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS
 
 [Server]
@@ -100,16 +100,21 @@ IP=127.0.0.1
 Port=53
 
 [Security]
-RateLimit=10
-Blacklist=blocked_domains.txt
-StealthMode=True
+ratelimit = 0
+blacklist = blocked_domains.txt
+stealthmode = True
+ThreatUpdateInterval = 86400
+AllowedNetworks=
+MaxResponseSize=512
+EnableAntiAmplification=True
+
+[AdBlocking]
+EnableAdBlocking=True
+AdBlockLists=https://easylist.to/easylist/easylist.txt,https://adaway.org/hosts.txt
+UpdateInterval=86400
 
 [Logging]
-LogFile=dns_proxy.log
-
-[Web]
-Username=admin
-Password=secret
+logfile = dns_proxy.log
 ```
 
 ## Ejemplo de `stunnel.conf`
