@@ -178,7 +178,7 @@
             <div id="stats-table" class="card">
                 <table class="stats-table">
                     <thead><tr><th>Total Consultas</th><th>Consultas Exitosas</th><th>Consultas Fallidas</th><th>Tiempo Promedio</th><th>Dominios Bloqueados</th><th>AD Block</th></tr></thead>
-                    <tbody><tr><td id="total_queries">0</td><td id="success_count">0</td><td id="error_count">0</td><td id="avg_time">0 ms</td><td id="blocked_domains_count">0</td><td id="blocked_ad_domains">0</td>/td></tr></tbody>
+                    <tbody><tr><td id="total_queries">0</td><td id="success_count">0</td><td id="error_count">0</td><td id="avg_time">0 ms</td><td id="blocked_domains_count">0</td><td id="blocked_ad_domains">0</td></tr></tbody>
                 </table>
             </div>
             <div class="card">
@@ -206,13 +206,8 @@
             <div id="config-table" class="card">
                 <table class="config-table">
                     <thead><tr><th>Parámetro</th><th>Valor</th></tr></thead>
-                    <tbody>
-                        <tr><td>Servidores DoH</td><td id="doh_servers" class="editable" data-key="doh_servers">Cargando...</td></tr>
-                        <tr><td>Tipos de Consulta Permitidos</td><td id="allowed_qtypes" class="editable" data-key="allowed_qtypes">Cargando...</td></tr>
-                        <tr><td>IP del Servidor</td><td id="server_ip" class="editable" data-key="server_ip">Cargando...</td></tr>
-                        <tr><td>Puerto del Servidor</td><td id="server_port" class="editable" data-key="server_port">Cargando...</td></tr>
-                        <tr><td>Límite de Consultas</td><td id="rate_limit" class="editable" data-key="rate_limit">Cargando...</td></tr>
-                        <tr><td>Archivo de Lista Negra</td><td id="blacklist_file" class="editable" data-key="blacklist_file">Cargando...</td></tr>
+                    <tbody id="config-body">
+                        <!-- Los valores se llenarán dinámicamente desde JavaScript -->
                     </tbody>
                 </table>
             </div>
@@ -307,36 +302,41 @@
         }
 
         // Cargar configuración inicial y edición inline
-        fetch('/config_ini', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
-            .then(response => response.json())
-            .then(data => {
-                Object.keys(data).forEach(key => {
-                    const el = document.getElementById(key);
-                    if (el) {
-                        el.textContent = Array.isArray(data[key]) ? data[key].join(', ') : data[key];
-                        el.onclick = () => {
-                            const input = document.createElement('input');
-                            input.value = el.textContent;
-                            input.onblur = () => saveConfig(key, input.value);
-                            input.onkeypress = (e) => { if (e.key === 'Enter') saveConfig(key, input.value); };
-                            el.innerHTML = '';
-                            el.appendChild(input);
-                            input.focus();
-                        };
-                    }
-                });
-                document.getElementById('config-error').style.display = 'none';
-            })
-            .catch(err => document.getElementById('config-error').textContent = `Error: ${err}`);
-
-        function saveConfig(key, value) {
+        document.addEventListener("DOMContentLoaded", function () {
+            fetch('/config_ini')
+                .then(response => response.json())
+                .then(data => {
+                    let tbody = document.getElementById("config-body");
+                    tbody.innerHTML = "";
+        
+                    Object.keys(data).forEach(key => {
+                        let value = Array.isArray(data[key]) ? data[key].join(", ") : data[key];
+                        let row = `<tr>
+                            <td>${key}</td>
+                            <td contenteditable="true" class="editable" data-key="${key}">${value}</td>
+                        </tr>`;
+                        tbody.innerHTML += row;
+                    });
+                })
+                .catch(error => console.error("Error al cargar configuración:", error));
+        });
+        
+        function applyConfig() {
+            let updatedConfig = {};
+            document.querySelectorAll(".editable").forEach(cell => {
+                let key = cell.dataset.key;
+                let value = cell.innerText.trim();
+                updatedConfig[key] = value.includes(",") ? value.split(",").map(v => v.trim()) : value;
+            });
+        
             fetch('/config_ini', {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + btoa('admin:secret') },
-                body: JSON.stringify({ [key]: value })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedConfig)
             })
-                .then(() => showToast(`Configuración ${key} actualizada`, 'success'))
-                .catch(err => showToast(`Error al actualizar ${key}: ${err}`, 'error'));
+            .then(response => response.json())
+            .then(data => alert(data.message || "Configuración actualizada correctamente"))
+            .catch(error => alert("Error al actualizar configuración: " + error));
         }
 
         // Gestión de Lista Negra
