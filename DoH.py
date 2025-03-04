@@ -94,6 +94,8 @@ def show_help():
       {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py{COLOR['RESET']}
   {COLOR['INFO']}ℹ️ Mostrar esta ayuda:{COLOR['RESET']}  
       {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --help{COLOR['RESET']}
+  {COLOR['INFO']}ℹ️ Hacer un test de la configuracion:{COLOR['RESET']}  
+      {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --test{COLOR['RESET']}
 
 {COLOR['SUCCESS']}═══════════════════════════════════════════════════════════════════════════════════════{COLOR['RESET']}
 """
