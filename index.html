@@ -164,6 +164,7 @@
             <div class="tab" id="config-tab" role="tab" aria-selected="false">Configuración</div>
             <div class="tab" id="logs-tab" role="tab" aria-selected="false">Logs</div>
             <div class="tab" id="blacklist-tab" role="tab" aria-selected="false">Lista Negra</div>
+            <div class="tab" id="blocked-urls-tab" role="tab" aria-selected="false">URLs Bloqueadas</div>
         </div>
 
         <div id="stats-content" class="tab-content active" role="tabpanel">
@@ -236,7 +237,19 @@
             </div>
             <div id="blacklist-error" class="alert alert-error" style="display: none;"></div>
         </div>
+
+        <div id="blocked-urls-content" class="tab-content" role="tabpanel">
+            <h2>URLs Bloqueadas</h2>
+            <div class="blacklist-section card">
+                <input type="text" id="blocked-url-input" class="blacklist-input" placeholder="Ingrese URL a bloquear (ej. https://example.com)">
+                <button class="button" onclick="addBlockedUrl()">Agregar</button>
+                <input type="text" id="blocked-url-search" class="search-input" placeholder="Buscar URLs..." onkeyup="filterBlockedUrls()">
+                <ul id="blocked-url-list" class="blacklist-list"></ul>
+            </div>
+            <div id="blocked-urls-error" class="alert alert-error" style="display: none;"></div>
+        </div>
     </div>
+
 
     <label class="theme-switch" id="theme-toggle" aria-label="Cambiar tema">
         <input type="checkbox" id="theme-switch">
@@ -403,6 +416,70 @@
             renderBlacklist();
         }
 
+        let blockedUrls = [];
+
+        function updateBlockedUrls() {
+            fetch('/blocked_urls', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
+                .then(response => response.json())
+                .then(data => {
+                    blockedUrls = data;
+                    renderBlockedUrls();
+                    document.getElementById('blocked-urls-error').style.display = 'none';
+                })
+                .catch(err => document.getElementById('blocked-urls-error').textContent = `Error: ${err}`);
+        }
+
+        function renderBlockedUrls() {
+            const list = document.getElementById('blocked-url-list');
+            list.innerHTML = '';
+            const filter = document.getElementById('blocked-url-search').value.toLowerCase();
+            blockedUrls.filter(url => url.toLowerCase().includes(filter)).forEach(url => {
+                const li = document.createElement('li');
+                li.className = 'blacklist-item';
+                li.textContent = url;
+                const btn = document.createElement('button');
+                btn.textContent = 'Eliminar';
+                btn.className = 'button';
+                btn.onclick = () => removeBlockedUrl(url);
+                li.appendChild(btn);
+                list.appendChild(li);
+            });
+        }
+
+        function addBlockedUrl() {
+            const url = document.getElementById('blocked-url-input').value.trim();
+            if (url) {
+                fetch('/blocked_urls/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + btoa('admin:secret') },
+                    body: JSON.stringify({ url })
+                })
+                    .then(() => {
+                        updateBlockedUrls();
+                        document.getElementById('blocked-url-input').value = '';
+                        showToast(`URL ${url} añadida`, 'success');
+                    })
+                    .catch(err => showToast(`Error: ${err}`, 'error'));
+            }
+        }
+
+        function removeBlockedUrl(url) {
+            fetch('/blocked_urls/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + btoa('admin:secret') },
+                body: JSON.stringify({ url })
+            })
+                .then(() => {
+                    updateBlockedUrls();
+                    showToast(`URL ${url} eliminada`, 'success');
+                })
+                .catch(err => showToast(`Error: ${err}`, 'error'));
+        }
+
+        function filterBlockedUrls() {
+            renderBlockedUrls();
+        }
+
         // Filtrado de Logs
         function filterLogs() {
             const filter = document.getElementById('log-search').value.toLowerCase();
@@ -538,6 +615,7 @@
         }, 2000);
 
         window.onload = () => {
+            updateBlockedUrls();
             updateBlacklist();
         };
     </script>
