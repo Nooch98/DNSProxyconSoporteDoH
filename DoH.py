@@ -37,6 +37,15 @@ COLOR = {
 # Variables globales
 query_count = defaultdict(int)  # Contador de consultas por IP
 blocked_domains = set()  # Lista negra de dominios
+blocked_urls_domains = set()
+with open("blocked_urls.txt", "r") as f:
+    for line in f:
+        url = line.strip()
+        domain = urlparse(url).hostname or url  # Extrae el dominio de la URL
+        if domain:
+            blocked_urls_domains.add(domain)
+
+print(blocked_urls_domains)
 success_count = 0
 error_count = 0
 total_query_time = 0
@@ -67,7 +76,8 @@ def show_help():
   {COLOR['INFO']}✔ Convierte las consultas a DNS sobre HTTPS (DoH) con validación DNSSEC.{COLOR['RESET']}
   {COLOR['INFO']}✔ Usa caché local para respuestas rápidas y envía consultas a servidores DoH configurados.{COLOR['RESET']}
   {COLOR['INFO']}✔ Responde con IPs resueltas, limitando tamaño para evitar amplificación.{COLOR['RESET']}
-  {COLOR['INFO']}✔ Bloquea Anuncios y Dominios maliciosos.{COLOR['RESET']}
+  {COLOR['INFO']}✔ Bloquea Anuncios, Dominios maliciosos y URLs específicas.{COLOR['RESET']}
+  {COLOR['INFO']}✔ Limpia automáticamente la caché DNS del sistema al iniciar.{COLOR['RESET']}
 
 {COLOR['BOLD']}🔧 Configuración:{COLOR['RESET']}
   {COLOR['GRAY']}🛠️ Personaliza el servidor editando {COLOR['BOLD']}config.ini{COLOR['RESET']}{COLOR['GRAY']}:{COLOR['RESET']}
@@ -75,10 +85,13 @@ def show_help():
     - {COLOR['INFO']}Tipos permitidos → [DNS] AllowedQtypes=A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS{COLOR['RESET']}
     - {COLOR['INFO']}IP y puerto → [Server] IP=0.0.0.0 Port=53 (0.0.0.0 para VPS público){COLOR['RESET']}
     - {COLOR['INFO']}Seguridad → [Security] RateLimit=10 Blacklist=blocked_domains.txt StealthMode=True{COLOR['RESET']}
+    - {COLOR['INFO']}Bloqueo por URL → [Security] EnableURLBlocking=True (activa bloqueo en blocked_urls.txt){COLOR['RESET']}
     - {COLOR['INFO']}Redes permitidas → [Security] AllowedNetworks= (vacío para acceso público, ej. 127.0.0.1/32 para local){COLOR['RESET']}
     - {COLOR['INFO']}Anti-amplificación → [Security] MaxResponseSize=512 EnableAntiAmplification=True{COLOR['RESET']}
   {COLOR['WARNING']}⚠️ Si no existe config.ini, se genera con valores predeterminados.{COLOR['RESET']}
+  {COLOR['WARNING']}⚠️ Para bloqueo por URL, edita blocked_urls.txt con URLs completas (ej. https://example.com).{COLOR['RESET']}
   {COLOR['SUCCESS']}🔄 Cambios aplicados en caliente al modificar config.ini.{COLOR['RESET']}
+  {COLOR['GRAY']}Nota: Limpia manualmente la caché del navegador para aplicar bloqueos inmediatamente.{COLOR['RESET']}
 
 {COLOR['BOLD']}📊 Características:{COLOR['RESET']}
   {COLOR['MAGENTA']}✅ Soporta A, AAAA, CNAME, MX, TXT, NS, SOA, HTTPS con DNSSEC.{COLOR['RESET']}
@@ -87,14 +100,14 @@ def show_help():
   {COLOR['MAGENTA']}✅ Reintentos automáticos ante fallos.{COLOR['RESET']}
   {COLOR['MAGENTA']}✅ Protección contra DNS malicioso y amplificación (ideal para VPS públicos).{COLOR['RESET']}
   {COLOR['MAGENTA']}✅ Configuración dinámica sin reinicio.{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Bloquea anuncios.{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Bloquea anuncios y URLs personalizadas.{COLOR['RESET']}
 
 {COLOR['BOLD']}📝 Comandos disponibles:{COLOR['RESET']}
   {COLOR['INFO']}💡 Iniciar el servidor DNS Proxy:{COLOR['RESET']}  
       {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py{COLOR['RESET']}
   {COLOR['INFO']}ℹ️ Mostrar esta ayuda:{COLOR['RESET']}  
       {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --help{COLOR['RESET']}
-  {COLOR['INFO']}ℹ️ Hacer un test de la configuracion:{COLOR['RESET']}  
+  {COLOR['INFO']}ℹ️ Hacer un test de la configuración:{COLOR['RESET']}  
       {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --test{COLOR['RESET']}
 
 {COLOR['SUCCESS']}═══════════════════════════════════════════════════════════════════════════════════════{COLOR['RESET']}
@@ -129,6 +142,7 @@ IP = config['Server']['IP']
 PORT = int(config['Server']['Port'])
 RATE_LIMIT = int(config['Security']['RateLimit'])
 BLACKLIST_FILE = config['Security']['Blacklist']
+BLOCKED_URLS_FILE = "blocked_urls.txt"
 THREAT_LIST_URLS = [
     "https://openphish.com/feed.txt",  # Lista de phishing
     "https://www.malwaredomainlist.com/hostslist/hosts.txt",  # Malware
@@ -158,11 +172,40 @@ logging.basicConfig(filename=config['Logging']['LogFile'], level=logging.INFO,
 STEALTH_MODE = config.getboolean('Security', 'StealthMode')
 BLOCKED_IPS_FILE = "blocked_ips.txt"
 ALLOW_PRIVATE_IPS = config.getboolean('Security', 'AllowPrivateIPs', fallback=False)
+ENABLE_URL_BLOCKING = config.getboolean('Security', 'EnableURLBlocking', fallback=False)
 server_latencies = {server: float('inf') for server in DOH_SERVERS}
 latency_lock = threading.Lock()
 server = None
 server_thread = None
 flask_app_running = True
+
+def log(message, level="INFO"):
+    global stats
+
+    # Actualizar estadísticas
+    if "consultas exitosas" in message:
+        stats["total_resolved"] += 1
+    elif "consultas fallidas" in message:
+        stats["total_failed"] += 1
+    stats["total_queries"] += 1
+    
+    # Obtener el timestamp y color según el nivel de log
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    color = COLOR[level] if level in COLOR else ""
+    
+    # Mostrar el mensaje en la terminal con el color correspondiente
+    print(f"{color}[{timestamp}] {message}{COLOR['RESET']}")
+
+    # Usar el método de logging adecuado para el nivel
+    if level.lower() == "info":
+        logging.info(message)
+    elif level.lower() == "warning":
+        logging.warning(message)
+    elif level.lower() == "error":
+        logging.error(message)
+    elif level.lower() == "success":
+        # Usamos info() para 'success' porque no existe un método específico
+        logging.info(message)
 
 def is_private_ip(ip):
     try:
@@ -247,7 +290,26 @@ def update_adblock_list():
 
 if ENABLE_AD_BLOCKING:
     threading.Thread(target=update_adblock_list, daemon=True).start()
-                               
+
+def load_blocked_urls():
+    global blocked_urls_domains
+    blocked_urls_domains.clear()
+    if os.path.exists(BLOCKED_URLS_FILE):
+        with open(BLOCKED_URLS_FILE, 'r') as f:
+            for line in f:
+                url = line.strip()
+                if url:
+                    parsed_url = urlparse(url)
+                    domain = parsed_url.hostname
+                    if domain:
+                        blocked_urls_domains.add(domain.lower())
+        log(f"[🔒 URL BLOCK] Cargados {len(blocked_urls_domains)} dominios desde {BLOCKED_URLS_FILE}", "SUCCESS")
+    else:
+        log(f"[⚠️ URL BLOCK] Archivo {BLOCKED_URLS_FILE} no encontrado, creando uno vacío", "WARNING")
+        open(BLOCKED_URLS_FILE, 'a').close()
+
+load_blocked_urls()
+                            
 def set_windows_dns(ip, port):
     interface = get_active_interface()
     if not interface:
@@ -300,34 +362,6 @@ threading.Thread(target=update_server_latencies, daemon=True).start()
 def get_best_doh_server():
     with latency_lock:
         return min(server_latencies, key=server_latencies.get)
-
-def log(message, level="INFO"):
-    global stats
-
-    # Actualizar estadísticas
-    if "consultas exitosas" in message:
-        stats["total_resolved"] += 1
-    elif "consultas fallidas" in message:
-        stats["total_failed"] += 1
-    stats["total_queries"] += 1
-    
-    # Obtener el timestamp y color según el nivel de log
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    color = COLOR[level] if level in COLOR else ""
-    
-    # Mostrar el mensaje en la terminal con el color correspondiente
-    print(f"{color}[{timestamp}] {message}{COLOR['RESET']}")
-
-    # Usar el método de logging adecuado para el nivel
-    if level.lower() == "info":
-        logging.info(message)
-    elif level.lower() == "warning":
-        logging.warning(message)
-    elif level.lower() == "error":
-        logging.error(message)
-    elif level.lower() == "success":
-        # Usamos info() para 'success' porque no existe un método específico
-        logging.info(message)
 
 def cargar_ips_bloqueadas():
     if os.path.exists(BLOCKED_IPS_FILE):
@@ -395,17 +429,6 @@ class DNSProxy(socketserver.BaseRequestHandler):
         client_ip = self.client_address[0]
         query_count[client_ip] += 1
         
-        if qtype in ['A', 'AAAA']:
-            for rr in dns_response.rr:
-                if rr.rtype in [QTYPE.A, QTYPE.AAAA]:
-                    ip = str(rr.rdata)
-                    if is_private_ip(ip) and not ALLOW_PRIVATE_IPS:
-                        log(f"[🚫 SEGURIDAD] Bloqueado DNS Rebinding para {qname} -> {ip}", "WARNING")
-                        reply = request.reply()
-                        reply.header.rcode = 3  # NXDOMAIN
-                        sock.sendto(reply.pack(), self.client_address)
-                        return
-        
         if ALLOWED_NETWORKS:
             client_ip_obj = ipaddress.ip_address(client_ip)
             if not any(client_ip_obj in net for net in ALLOWED_NETWORKS):
@@ -430,7 +453,15 @@ class DNSProxy(socketserver.BaseRequestHandler):
         
         qname = str(request.q.qname).rstrip('.')  # Eliminar el punto final para consistencia
         qtype = QTYPE.get(request.q.qtype, "UNKNOWN")
-
+        
+        # Bloqueo por URL
+        log(f"[DEBUG] Chequeando bloqueo para {qname}", "INFO")
+        if ENABLE_URL_BLOCKING and any(qname.endswith(blocked_domain) for blocked_domain in blocked_urls_domains):
+            log(f"[🚫 URL BLOCK] Consulta bloqueada para {qname} (URL restringida)")
+            reply = request.reply()
+            reply.header.rcode = 3  # NXDOMAIN: dominio no existe
+            sock.sendto(reply.pack(), self.client_address)
+            return
         
         # Bloqueo de anuncios
         if ENABLE_AD_BLOCKING and qname in ad_block_domains:
@@ -508,6 +539,17 @@ class DNSProxy(socketserver.BaseRequestHandler):
                 
                 log(f"[✅ RESPUESTA] {qname} ({qtype}) → Resolución: {resolved_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
                 response_data = dns_response.pack()
+                
+                if qtype in ['A', 'AAAA']:
+                    for rr in dns_response.rr:
+                        if rr.rtype in [QTYPE.A, QTYPE.AAAA]:
+                            ip = str(rr.rdata)
+                            if is_private_ip(ip) and not ALLOW_PRIVATE_IPS:
+                                log(f"[🚫 SEGURIDAD] Bloqueado DNS Rebinding para {qname} -> {ip}", "WARNING")
+                                reply = request.reply()
+                                reply.header.rcode = 3  # NXDOMAIN
+                                sock.sendto(reply.pack(), self.client_address)
+                                return
                 
                 if ENABLE_ANTI_AMPLIFICATION and len(response_data) > MAX_RESPONSE_SIZE:
                     log(f"[⚠️ SEGURIDAD] Respuesta para {qname} truncada (tamaño: {len(response_data)} > {MAX_RESPONSE_SIZE})", "WARNING")
@@ -781,6 +823,45 @@ def remove_from_blacklist():
         return jsonify({"message": f"{domain} eliminado de la lista negra"}), 200
     return jsonify({"error": "Dominio no encontrado"}), 404
 
+@app.route('/blocked_urls', methods=['GET'])
+@requires_auth
+def get_blocked_urls():
+    with open(BLOCKED_URLS_FILE, 'r') as f:
+        urls = [line.strip() for line in f if line.strip()]
+    return jsonify(urls)
+
+@app.route('/blocked_urls/add', methods=['POST'])
+@requires_auth
+def add_blocked_url():
+    url = request.json.get('url')
+    if url:
+        parsed_url = urlparse(url)
+        domain = parsed_url.hostname
+        if domain:
+            with open(BLOCKED_URLS_FILE, 'a') as f:
+                f.write(f"{url}\n")
+            blocked_urls_domains.add(domain.lower())
+            log(f"[🔒 URL BLOCK] URL {url} añadida (dominio: {domain})", "SUCCESS")
+            return jsonify({"message": f"URL {url} añadida"}), 200
+    return jsonify({"error": "URL inválida"}), 400
+
+@app.route('/blocked_urls/remove', methods=['POST'])
+@requires_auth
+def remove_blocked_url():
+    url = request.json.get('url')
+    if url:
+        parsed_url = urlparse(url)
+        domain = parsed_url.hostname
+        if domain and domain.lower() in blocked_urls_domains:
+            blocked_urls_domains.remove(domain.lower())
+            with open(BLOCKED_URLS_FILE, 'r') as f:
+                urls = [line.strip() for line in f if line.strip() != url]
+            with open(BLOCKED_URLS_FILE, 'w') as f:
+                f.writelines(f"{u}\n" for u in urls)
+            log(f"[🔓 URL BLOCK] URL {url} eliminada (dominio: {domain})", "SUCCESS")
+            return jsonify({"message": f"URL {url} eliminada"}), 200
+    return jsonify({"error": "URL no encontrada"}), 404
+
 @app.route('/config_ini', methods=['PATCH'])
 @requires_auth
 def update_config():
@@ -871,12 +952,14 @@ def reload_config(signal, frame):
     DOH_SERVERS = config['DNS']['Servers'].split(',')
     ALLOWED_QTYPES = config['DNS']['AllowedQtypes'].split(',')
     RATE_LIMIT = int(config['Security']['RateLimit'])
+    ENABLE_URL_BLOCKING = config.getboolean('Security', 'EnableURLBlocking', fallback=False)
 
     if os.path.exists(BLACKLIST_FILE):
         with open(BLACKLIST_FILE) as f:
             blocked_domains.clear()
             blocked_domains.update(line.strip() for line in f if line.strip())
 
+    load_blocked_urls()
     log("🔄 Configuración recargada.", "SUCCESS")
     
 def start_dns_server():
@@ -1005,6 +1088,23 @@ def run_tests():
         log(f"[❌ ERROR] Valor inválido para AllowPrivateIPs: {config['Security']['AllowPrivateIPs']}", "ERROR")
         sys.exit(1)
 
+    # EnableURLBlocking (nueva validación)
+    if 'EnableURLBlocking' not in config['Security']:
+        log("[❌ ERROR] Falta clave 'EnableURLBlocking' en sección [Security].", "ERROR")
+        sys.exit(1)
+    try:
+        enable_url_blocking = config.getboolean('Security', 'EnableURLBlocking')
+        log(f"[✅ OK] EnableURLBlocking configurado como: {enable_url_blocking}", "INFO")
+        if enable_url_blocking:
+            blocked_urls_file = 'blocked_urls.txt'
+            if not os.path.exists(blocked_urls_file):
+                log(f"[⚠️ WARNING] El archivo de URLs bloqueadas {blocked_urls_file} no existe.", "WARNING")
+            else:
+                log(f"[✅ OK] Archivo de URLs bloqueadas encontrado: {blocked_urls_file}", "INFO")
+    except ValueError:
+        log(f"[❌ ERROR] Valor inválido para EnableURLBlocking: {config['Security']['EnableURLBlocking']}", "ERROR")
+        sys.exit(1)
+
     # 8. Validar AllowedNetworks (opcional)
     allowed_networks = config.get('Security', 'AllowedNetworks', fallback='').split(',')
     if allowed_networks and allowed_networks[0]:
@@ -1047,6 +1147,16 @@ def run_tests():
     # 10. Éxito si no hay errores
     log("Configuración verificada correctamente.", "SUCCESS")
     sys.exit(0)
+    
+def flush_dns_cache():
+    subprocess.run(["ipconfig", "/flushdns"], capture_output=True, text=True, check=True)
+    log("DNS Cache de Windows limpiada.", "INFO")
+    log("Para asegurar que el script funcione correctamente, limpia la caché DNS de tu navegador manualmente.", "INFO")
+    log("Instrucciones para navegadores comunes:", "INFO")
+    log("- Google Chrome: Abre chrome://net-internals/#dns y haz clic en 'Clear host cache'.", "INFO")
+    log("- Mozilla Firefox: Abre about:config, busca 'network.dnsCacheExpiration', establece un valor bajo (como 1) y reinicia el navegador.", "INFO")
+    log("- Microsoft Edge: Abre edge://net-internals/#dns y haz clic en 'Clear host cache'.", "INFO")
+    log("Alternativamente, cierra y vuelve a abrir tu navegador o usa una ventana de incógnito.", "INFO")
 
 # Verificar si el sistema operativo soporta SIGHUP antes de intentar registrar la señal
 if platform.system() != "Windows":
@@ -1062,7 +1172,8 @@ if __name__ == "__main__":
     if "--test" in sys.argv:
         run_tests()
         sys.exit(0)
-        
+    
+    flush_dns_cache()
     stunnel_proc = iniciar_stunnel()
     
     if set_windows_dns(IP, PORT):
