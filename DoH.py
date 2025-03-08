@@ -323,33 +323,45 @@ def load_blocked_urls():
 load_blocked_urls()
                             
 def set_windows_dns(ip, port):
-    interface = get_active_interface()
-    if not interface:
-        log("No se pudo determinar la interfaz de red activa.", "ERROR")
-        return False
-    
     try:
-        cmd = f"netsh interface ip set dns name=\"{interface}\" source=static addr={ip}"
+        interface = config.get('Network', 'interface_name', fallback=None)
+        if not interface:
+            log("No se especificó una interfaz en config.ini bajo [Network] 'interface_name'.", "ERROR")
+            return False
+        
+        cmd = f"netsh interface ip set dnsservers name=\"{interface}\" source=static {ip} primary"
         subprocess.run(cmd, shell=True, check=True, text=True)
         log(f"DNS de Windows configurado a {ip} en la interfaz '{interface}'.", "SUCCESS")
         return True
+    except configparser.NoSectionError:
+        log("Falta la sección [Network] en config.ini.", "ERROR")
+        return False
+    except configparser.NoOptionError:
+        log("Falta 'interface_name' en la sección [Network] de config.ini.", "ERROR")
+        return False
     except subprocess.CalledProcessError as e:
-        log(f"Error al configurar DNS en Windows: {e}", "ERROR")
+        log(f"Error al configurar DNS en Windows para la interfaz '{interface}': {e}", "ERROR")
         return False
-    
+
 def reset_windows_dns():
-    interface = get_active_interface()
-    if not interface:
-        log("No se pudo determinar la interfaz de red activa.", "ERROR")
-        return False
-    
     try:
-        cmd = f"netsh interface ip set dns name=\"{interface}\" source=dhcp"
+        interface = config.get('Network', 'interface_name', fallback=None)
+        if not interface:
+            log("No se especificó una interfaz en config.ini bajo [Network] 'interface_name'.", "ERROR")
+            return False
+        
+        cmd = f"netsh interface ip set dnsservers name=\"{interface}\" source=dhcp"
         subprocess.run(cmd, shell=True, check=True, text=True)
         log(f"DNS de Windows restaurado a automático en la interfaz '{interface}'.", "SUCCESS")
         return True
+    except configparser.NoSectionError:
+        log("Falta la sección [Network] en config.ini.", "ERROR")
+        return False
+    except configparser.NoOptionError:
+        log("Falta 'interface_name' en la sección [Network] de config.ini.", "ERROR")
+        return False
     except subprocess.CalledProcessError as e:
-        log(f"Error al restaurar DNS en Windows: {e}", "ERROR")
+        log(f"Error al restaurar DNS en Windows para la interfaz '{interface}': {e}", "ERROR")
         return False
 
 def measure_latency(server):
