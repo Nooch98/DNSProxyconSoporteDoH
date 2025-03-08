@@ -33,9 +33,39 @@ from urllib.parse import urlparse
 
 # 🎨 Colores para la salida en terminal
 COLOR = {
-    "INFO": "\033[94m", "SUCCESS": "\033[92m", "WARNING": "\033[93m",
-    "ERROR": "\033[91m", "BOLD": "\033[1m", "UNDERLINE": "\033[4m",
-    "CYAN": "\033[96m", "MAGENTA": "\033[95m", "GRAY": "\033[90m", "RESET": "\033[0m"
+    "INFO": "\033[94m",         # Azul claro
+    "SUCCESS": "\033[92m",      # Verde
+    "WARNING": "\033[93m",      # Amarillo
+    "ERROR": "\033[91m",        # Rojo
+    "BOLD": "\033[1m",          # Negrita
+    "UNDERLINE": "\033[4m",     # Subrayado
+    "CYAN": "\033[96m",         # Cian claro
+    "MAGENTA": "\033[95m",      # Magenta
+    "GRAY": "\033[90m",         # Gris oscuro
+    "WHITE": "\033[97m",        # Blanco brillante
+    "BLACK": "\033[30m",        # Negro
+    "RED": "\033[31m",          # Rojo intenso
+    "GREEN": "\033[32m",        # Verde intenso
+    "YELLOW": "\033[33m",       # Amarillo intenso
+    "BLUE": "\033[34m",         # Azul intenso
+    "PURPLE": "\033[35m",       # Púrpura
+    "LIGHT_GRAY": "\033[37m",   # Gris claro
+    "DARK_GRAY": "\033[90m",    # Gris oscuro
+    "LIGHT_RED": "\033[91m",    # Rojo claro
+    "LIGHT_GREEN": "\033[92m",  # Verde claro
+    "LIGHT_YELLOW": "\033[93m", # Amarillo claro
+    "LIGHT_BLUE": "\033[94m",   # Azul claro
+    "LIGHT_MAGENTA": "\033[95m",# Magenta claro
+    "LIGHT_CYAN": "\033[96m",   # Cian claro
+    "BG_BLACK": "\033[40m",     # Fondo negro
+    "BG_RED": "\033[41m",       # Fondo rojo
+    "BG_GREEN": "\033[42m",     # Fondo verde
+    "BG_YELLOW": "\033[43m",    # Fondo amarillo
+    "BG_BLUE": "\033[44m",      # Fondo azul
+    "BG_MAGENTA": "\033[45m",   # Fondo magenta
+    "BG_CYAN": "\033[46m",      # Fondo cian
+    "BG_WHITE": "\033[47m",     # Fondo blanco
+    "RESET": "\033[0m"          # Restablecer color
 }
 
 # Variables globales
@@ -61,55 +91,62 @@ stats = {
 
 def show_help():
     help_text = f"""
-{COLOR['SUCCESS']}═══════════════════════════════════════════════════════════════════════════════════════
-          🔹 {COLOR['BOLD']}DNS Proxy con soporte para DoH (DNS over HTTPS) - Guía de Uso 🔹{COLOR['RESET']}{COLOR['SUCCESS']}
-═══════════════════════════════════════════════════════════════════════════════════════{COLOR['RESET']}
+{COLOR['BG_BLUE']}{COLOR['WHITE']}{COLOR['BOLD']}═══════════════════════════════════════════════════════════════════════════════════════{COLOR['RESET']}
+          🔹 {COLOR['BOLD']}DNS Proxy con soporte para DoH (DNS over HTTPS) - Guía de Uso 🔹
+{COLOR['BG_BLUE']}{COLOR['WHITE']}{COLOR['BOLD']}═══════════════════════════════════════════════════════════════════════════════════════{COLOR['RESET']}
 
-{COLOR['BOLD']}{COLOR['INFO']}📌 ¿Qué hace este script?{COLOR['RESET']}
-  - {COLOR['CYAN']}Este servidor DNS Proxy intercepta consultas DNS y las redirige a servidores DoH (DNS sobre HTTPS).{COLOR['RESET']}
-  - {COLOR['CYAN']}El objetivo es mejorar la privacidad, evitar bloqueos de ISP y proteger contra amenazas en red.{COLOR['RESET']}
+{COLOR['BOLD']}{COLOR['INFO']}📌 Descripción:{COLOR['RESET']}
+  {COLOR['CYAN']}Este script actúa como un servidor DNS Proxy que redirige consultas a servidores DoH (DNS sobre HTTPS).{COLOR['RESET']}
+  {COLOR['CYAN']}Ofrece mayor privacidad, evita bloqueos de ISP y protege contra amenazas en la red.{COLOR['RESET']}
 
-{COLOR['BOLD']}🛠️ ¿Cómo funciona?{COLOR['RESET']}
-  {COLOR['INFO']}✔ Recibe consultas DNS en {COLOR['UNDERLINE']}{IP}:{PORT}{COLOR['RESET']}.
-  {COLOR['INFO']}✔ Convierte las consultas a DNS sobre HTTPS (DoH) con validación DNSSEC.{COLOR['RESET']}
-  {COLOR['INFO']}✔ Usa caché local para respuestas rápidas y envía consultas a servidores DoH configurados.{COLOR['RESET']}
-  {COLOR['INFO']}✔ Responde con IPs resueltas, limitando tamaño para evitar amplificación.{COLOR['RESET']}
-  {COLOR['INFO']}✔ Bloquea Anuncios, Dominios maliciosos y URLs específicas.{COLOR['RESET']}
-  {COLOR['INFO']}✔ Limpia automáticamente la caché DNS del sistema al iniciar.{COLOR['RESET']}
+{COLOR['BOLD']}⚙️ Características principales:{COLOR['RESET']}
+  {COLOR['LIGHT_GREEN']}✅ Soporte para múltiples tipos de registros DNS (A, AAAA, CNAME, MX, TXT, etc.).{COLOR['RESET']}
+  {COLOR['LIGHT_GREEN']}✅ Validación DNSSEC para mayor seguridad.{COLOR['RESET']}
+  {COLOR['LIGHT_GREEN']}✅ Caché local para respuestas más rápidas.{COLOR['RESET']}
+  {COLOR['LIGHT_GREEN']}✅ Bloqueo de anuncios y dominios maliciosos.{COLOR['RESET']}
+  {COLOR['LIGHT_GREEN']}✅ Protección contra ataques de amplificación DNS.{COLOR['RESET']}
+  {COLOR['LIGHT_GREEN']}✅ Registro de actividad en dns_proxy.log.{COLOR['RESET']}
+  {COLOR['LIGHT_GREEN']}✅ Configuración dinámica sin necesidad de reinicio.{COLOR['RESET']}
 
-{COLOR['BOLD']}🔧 Configuración:{COLOR['RESET']}
-  {COLOR['GRAY']}🛠️ Personaliza el servidor editando {COLOR['BOLD']}config.ini{COLOR['RESET']}{COLOR['GRAY']}:{COLOR['RESET']}
-    - {COLOR['INFO']}Servidores DoH → [DNS] Servers=https://1.1.1.1/dns-query,https://8.8.8.8/dns-query{COLOR['RESET']}
-    - {COLOR['INFO']}Tipos permitidos → [DNS] AllowedQtypes=A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS{COLOR['RESET']}
-    - {COLOR['INFO']}IP y puerto → [Server] IP=0.0.0.0 Port=53 (0.0.0.0 para VPS público){COLOR['RESET']}
-    - {COLOR['INFO']}Seguridad → [Security] RateLimit=10 Blacklist=blocked_domains.txt StealthMode=True{COLOR['RESET']}
-    - {COLOR['INFO']}Bloqueo por URL → [Security] EnableURLBlocking=True (activa bloqueo en blocked_urls.txt){COLOR['RESET']}
-    - {COLOR['INFO']}Redes permitidas → [Security] AllowedNetworks= (vacío para acceso público, ej. 127.0.0.1/32 para local){COLOR['RESET']}
-    - {COLOR['INFO']}Anti-amplificación → [Security] MaxResponseSize=512 EnableAntiAmplification=True{COLOR['RESET']}
-  {COLOR['WARNING']}⚠️ Si no existe config.ini, se genera con valores predeterminados.{COLOR['RESET']}
-  {COLOR['WARNING']}⚠️ Para bloqueo por URL, edita blocked_urls.txt con URLs completas (ej. https://example.com).{COLOR['RESET']}
-  {COLOR['SUCCESS']}🔄 Cambios aplicados en caliente al modificar config.ini.{COLOR['RESET']}
-  {COLOR['GRAY']}Nota: Limpia manualmente la caché del navegador para aplicar bloqueos inmediatamente.{COLOR['RESET']}
+{COLOR['BOLD']}🛠️ Funcionamiento:{COLOR['RESET']}
+  {COLOR['INFO']}📡 Recibe consultas DNS en {COLOR['UNDERLINE']}{COLOR['YELLOW']}{IP}:{PORT}{COLOR['RESET']}.
+  {COLOR['INFO']}🔄 Convierte las consultas a DoH y valida las respuestas con DNSSEC.{COLOR['RESET']}
+  {COLOR['INFO']}⚡ Usa caché local para mejorar el rendimiento.{COLOR['RESET']}
+  {COLOR['INFO']}🛑 Bloquea dominios maliciosos y anuncios según listas configuradas.{COLOR['RESET']}
+  {COLOR['INFO']}📝 Registra actividad en dns_proxy.log para auditoría y depuración.{COLOR['RESET']}
+  {COLOR['INFO']}🔧 Configura automáticamente el DNS en Windows para usar el servidor proxy.{COLOR['RESET']}
 
-{COLOR['BOLD']}📊 Características:{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Soporta A, AAAA, CNAME, MX, TXT, NS, SOA, HTTPS con DNSSEC.{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Caché local para mejorar rendimiento (1000 entradas, TTL 1 hora).{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Registro detallado en dns_proxy.log.{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Registro de las IP que se conectan al servidor.{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Reintentos automáticos ante fallos.{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Protección contra DNS malicioso y amplificación (ideal para VPS públicos).{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Configuración dinámica sin reinicio.{COLOR['RESET']}
-  {COLOR['MAGENTA']}✅ Bloquea anuncios y URLs personalizadas.{COLOR['RESET']}
+{COLOR['BOLD']}🔧 Configuración avanzada:{COLOR['RESET']}
+  {COLOR['GRAY']}📄 Edita {COLOR['BOLD']}config.ini{COLOR['RESET']}{COLOR['GRAY']} para personalizar el servidor:{COLOR['RESET']}
+  {COLOR['MAGENTA']}🌍 Interfaz de red: {COLOR['BOLD']}[Network] InterfaceName=Ethernet{COLOR['RESET']}
+  {COLOR['MAGENTA']}🔗 Servidores DoH: {COLOR['BOLD']}[DNS] Servers=https://1.1.1.1/dns-query,https://8.8.8.8/dns-query{COLOR['RESET']}
+  {COLOR['MAGENTA']}📌 Tipos de consultas permitidas: {COLOR['BOLD']}[DNS] AllowedQtypes=A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS{COLOR['RESET']}
+  {COLOR['MAGENTA']}📡 IP y puerto del servidor: {COLOR['BOLD']}[Server] IP=0.0.0.0 Port=53{COLOR['RESET']}
+  {COLOR['MAGENTA']}🔒 Seguridad y filtrado: {COLOR['BOLD']}[Security] RateLimit=10 Blacklist=blocked_domains.txt{COLOR['RESET']}
+  {COLOR['MAGENTA']}🚫 Bloqueo de URLs: {COLOR['BOLD']}[Security] EnableURLBlocking=True (usa blocked_urls.txt){COLOR['RESET']}
+  {COLOR['MAGENTA']}🔄 Anti-amplificación: {COLOR['BOLD']}[Security] MaxResponseSize=512 EnableAntiAmplification=True{COLOR['RESET']}
+
+  {COLOR['WARNING']}⚠️ Si config.ini no existe, se generará automáticamente con valores predeterminados.{COLOR['RESET']}
+  {COLOR['WARNING']}⚠️ Para bloqueo por URL, edita blocked_urls.txt con las URLs específicas.{COLOR['RESET']}
+  {COLOR['SUCCESS']}✅ Cambios aplicados en tiempo real sin necesidad de reinicio.{COLOR['RESET']}
 
 {COLOR['BOLD']}📝 Comandos disponibles:{COLOR['RESET']}
   {COLOR['INFO']}💡 Iniciar el servidor DNS Proxy:{COLOR['RESET']}  
       {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py{COLOR['RESET']}
-  {COLOR['INFO']}ℹ️ Mostrar esta ayuda:{COLOR['RESET']}  
-      {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --help{COLOR['RESET']}
-  {COLOR['INFO']}ℹ️ Hacer un test de la configuración:{COLOR['RESET']}  
-      {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --test{COLOR['RESET']}
 
-{COLOR['SUCCESS']}═══════════════════════════════════════════════════════════════════════════════════════{COLOR['RESET']}
+  {COLOR['INFO']}ℹ️ Mostrar esta ayuda:{COLOR['RESET']}  
+      {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --help (-h){COLOR['RESET']}
+
+  {COLOR['INFO']}🛠️ Probar la configuración actual:{COLOR['RESET']}  
+      {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --test (-t){COLOR['RESET']}
+
+  {COLOR['INFO']}🧹 Limpiar la caché DNS del navegador:{COLOR['RESET']}  
+      {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --flush-dns (-fd){COLOR['RESET']}
+
+  {COLOR['INFO']}🌐 Listar interfaces de red disponibles:{COLOR['RESET']}  
+      {COLOR['BOLD']}{COLOR['CYAN']}python DoH.py --interface (-i){COLOR['RESET']}
+
+{COLOR['BG_BLUE']}{COLOR['WHITE']}{COLOR['BOLD']}═══════════════════════════════════════════════════════════════════════════════════════{COLOR['RESET']}
 """
     print(help_text)
 
@@ -194,30 +231,47 @@ def log(message, level="INFO"):
     # Actualizar estadísticas
     if "consultas exitosas" in message:
         stats["total_resolved"] += 1
-        success_count +=1
+        success_count += 1
     elif "consultas fallidas" in message:
         stats["total_failed"] += 1
         error_count += 1
     stats["total_queries"] += 1
     stats["blocked_domains_count"] = len(blocked_domains)
-    
+
     # Obtener el timestamp y color según el nivel de log
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    color = COLOR[level] if level in COLOR else ""
     
-    # Mostrar el mensaje en la terminal con el color correspondiente
-    print(f"{color}[{timestamp}] {message}{COLOR['RESET']}")
+    # Mapeo de colores según nivel de log
+    level_colors = {
+        "INFO": COLOR["INFO"],
+        "WARNING": COLOR["WARNING"],
+        "ERROR": COLOR["ERROR"],
+        "SUCCESS": COLOR["SUCCESS"],
+        "DEBUG": COLOR["LIGHT_GRAY"],
+        "CRITICAL": COLOR["BG_RED"]
+    }
+    
+    # Determinar el color del mensaje
+    color = level_colors.get(level.upper(), COLOR["RESET"])
 
-    # Usar el método de logging adecuado para el nivel
-    if level.lower() == "info":
+    # Mostrar el mensaje en la terminal con formato mejorado
+    print(f"{color}[{timestamp}] [{level.upper()}] {message}{COLOR['RESET']}")
+
+    # Registrar en el log con el método adecuado según el nivel
+    level = level.lower()
+    if level == "info":
         logging.info(message)
-    elif level.lower() == "warning":
+    elif level == "warning":
         logging.warning(message)
-    elif level.lower() == "error":
+    elif level == "error":
         logging.error(message)
-    elif level.lower() == "success":
-        # Usamos info() para 'success' porque no existe un método específico
-        logging.info(message)
+    elif level == "success":
+        logging.info(f"SUCCESS: {message}")  # 'SUCCESS' se registra como INFO
+    elif level == "debug":
+        logging.debug(message)
+    elif level == "critical":
+        logging.critical(message)
+
 
 def is_private_ip(ip):
     try:
@@ -225,20 +279,6 @@ def is_private_ip(ip):
         return ip_obj.is_private
     except ValueError:
         return False
-
-def get_active_interface():
-    """Obtiene el nombre de la interfaz de red activa en Windows."""
-    try:
-        output = subprocess.check_output("netsh interface show interface", shell=True, text=True)
-        for line in output.splitlines()[2:]:  # Saltar encabezados
-            if "Connected" in line:
-                match = re.search(r"\s+(\S+)$", line)
-                if match:
-                    return match.group(1)
-        return None
-    except subprocess.CalledProcessError as e:
-        log(f"Error al obtener interfaz activa: {e}", "ERROR")
-        return None
 
 def update_threat_list():
     global threat_domains
@@ -266,8 +306,6 @@ def update_threat_list():
         except Exception as e:
             log(f"[❌ THREAT] Error general al actualizar lista de amenazas: {e}", "ERROR")
         time.sleep(THREAT_UPDATE_INTERVAL)
-
-threading.Thread(target=update_threat_list, daemon=True).start()
 
 def update_adblock_list():
     global ad_block_domains, ENABLE_AD_BLOCKING, AD_BLOCK_LISTS, AD_BLOCK_UPDATE_INTERVAL
@@ -300,9 +338,6 @@ def update_adblock_list():
             log(f"[❌ ADBLOCK] Error general al actualizar lista de anuncios: {e}", "ERROR")
         time.sleep(AD_BLOCK_UPDATE_INTERVAL)
 
-if ENABLE_AD_BLOCKING:
-    threading.Thread(target=update_adblock_list, daemon=True).start()
-
 def load_blocked_urls():
     global blocked_urls_domains
     blocked_urls_domains.clear()
@@ -319,8 +354,6 @@ def load_blocked_urls():
     else:
         log(f"[⚠️ URL BLOCK] Archivo {BLOCKED_URLS_FILE} no encontrado, creando uno vacío", "WARNING")
         open(BLOCKED_URLS_FILE, 'a').close()
-
-load_blocked_urls()
                             
 def set_windows_dns(ip, port):
     try:
@@ -381,8 +414,6 @@ def update_server_latencies():
             threading.Thread(target=measure_latency, args=(server,), daemon=True).start()
         time.sleep(60)
 
-threading.Thread(target=update_server_latencies, daemon=True).start()
-
 def get_best_doh_server():
     with latency_lock:
         return min(server_latencies, key=server_latencies.get)
@@ -429,8 +460,6 @@ def send_doh_request(doh_query, headers, retries=3, delay=2, verify=True):
     error_count += 1
     log("[❌ DoH] Fallo tras intentar todos los servidores. Posible fuga DNS al ISP.", "ERROR")
     return None
-
-blocked_ips = cargar_ips_bloqueadas()
 
 def bloquear_ip(ip):
     blocked_ips.add(ip)
@@ -989,20 +1018,15 @@ def run_flask():
         if not flask_app_running:
             break
 
-# Iniciar Flask en un hilo separado
-flask_thread = threading.Thread(target=run_flask)
-flask_thread.daemon = True
-flask_thread.start()
 
 
 def print_stats():
     avg_time = total_query_time / success_count if success_count else 0
-    log("🔹 Estadísticas de rendimiento:", "INFO")
-    log(f"  - Consultas exitosas: {success_count}", "INFO")
-    log(f"  - Consultas fallidas: {error_count}", "INFO")
-    log(f"  - Tiempo promedio por consulta: {avg_time:.4f}s", "INFO")
-
-
+    log(f"{COLOR['BOLD']}{COLOR['INFO']}🔹 Estadísticas de rendimiento:{COLOR['RESET']}", "INFO")
+    log(f"  {COLOR['GREEN']} - Consultas exitosas:{COLOR['RESET']} {COLOR['CYAN']}{success_count}{COLOR['RESET']}", "INFO")
+    log(f"  {COLOR['RED']} - Consultas fallidas:{COLOR['RESET']} {COLOR['MAGENTA']}{error_count}{COLOR['RESET']}", "INFO")
+    log(f"  {COLOR['BOLD']}🔹 Consultas totales:{COLOR['RESET']} {COLOR['CYAN']}{stats['total_queries']}{COLOR['RESET']}", "INFO")
+    log(f"  {COLOR['YELLOW']} - Tiempo promedio por consulta:{COLOR['RESET']} {COLOR['LIGHT_BLUE']}{avg_time:.4f}s{COLOR['RESET']}", "INFO")
 
 def reload_config(signal, frame):
     """Recarga la configuración al recibir SIGHUP sin detener el servidor."""
@@ -1034,138 +1058,211 @@ def is_valid_interface(interface_name):
     available_interfaces = psutil.net_if_addrs().keys()
     return interface_name in available_interfaces
 
+def show_interfaces():
+    available_interfaces = psutil.net_if_addrs().keys()
+    print(f"{COLOR['BOLD']}{COLOR['INFO']}Interfaces de red disponibles:{COLOR['RESET']}")
+
+    if available_interfaces:
+        for interface in available_interfaces:
+            print(f"  {COLOR['CYAN']}- {interface}{COLOR['RESET']}")
+    else:
+        print(f"{COLOR['YELLOW']}  No se encontraron interfaces de red.{COLOR['RESET']}")
+
+
+def show_config():
+    if not os.path.exists('config.ini'):
+        print(f"{COLOR['ERROR']}El archivo config.ini no existe.{COLOR['RESET']}")
+        return
+    try:
+        if not config.read('config.ini'):
+            print(f"{COLOR['ERROR']}No se pudo leer el archivo config.ini correctamente.{COLOR['RESET']}")
+            return
+    except configparser.Error as e:
+        print(f"{COLOR['ERROR']}Error al leer config.ini: {e}{COLOR['RESET']}")
+        return
+    print(f"{COLOR['BOLD']}{COLOR['INFO']}Configuración del script (config.ini):{COLOR['RESET']}")
+    for section in config.sections():
+        print(f"\n{COLOR['BOLD']}{COLOR['CYAN']}[{section}]{COLOR['RESET']}")
+        for key, value in config.items(section):
+            print(f"  {COLOR['GREEN']}{key}{COLOR['RESET']}: {COLOR['LIGHT_GRAY']}{value}{COLOR['RESET']}")
+    
+    print(f"\n{COLOR['BOLD']}{COLOR['SUCCESS']}Configuración mostrada correctamente.{COLOR['RESET']}")
+
+def configure_script():
+    config = configparser.ConfigParser()
+
+    # Verificamos si el archivo 'config.ini' existe
+    if os.path.exists('config.ini'):
+        config.read('config.ini')
+        print(f"{COLOR['INFO']}Configuración cargada desde 'config.ini'.{COLOR['RESET']}")
+    else:
+        print(f"{COLOR['WARNING']}No se encontró 'config.ini'. Se creará uno nuevo.{COLOR['RESET']}")
+
+    # Secciones del archivo
+    sections = {
+        'Network': ['interface_name'],
+        'DNS': ['servers', 'allowedqtypes'],
+        'Server': ['ip', 'port'],
+        'Security': ['ratelimit', 'blacklist', 'stealthmode', 'ThreatUpdateInterval', 'AllowedNetworks', 'MaxResponseSize', 'EnableAntiAmplification', 'AllowPrivateIPs', 'EnableURLBlocking'],
+        'AdBlocking': ['EnableAdBlocking', 'AdBlockLists', 'UpdateInterval'],
+        'Logging': ['logfile']
+    }
+
+    # Interactuar con cada sección y clave en el archivo
+    for section, keys in sections.items():
+        if not config.has_section(section):
+            config.add_section(section)
+
+        print(f"\n{COLOR['BOLD']}{COLOR['CYAN']}Configuración de la sección [{section}]:{COLOR['RESET']}")
+        
+        for key in keys:
+            current_value = config.get(section, key, fallback=None)
+            if current_value:
+                print(f"  Valor actual para {key}: {current_value}")
+            new_value = input(f"Ingrese el nuevo valor para '{key}' (deje en blanco para mantener el valor actual): ")
+
+            # Si el usuario deja en blanco, no se actualiza el valor
+            if new_value:
+                config.set(section, key, new_value)
+
+    # Guardamos la configuración en el archivo 'config.ini'
+    with open('config.ini', 'w') as configfile:
+        config.write(configfile)
+
+    print(f"\n{COLOR['SUCCESS']}Configuración guardada en 'config.ini'.{COLOR['RESET']}")
+
 def run_tests():
-    log("Verificando configuración...", "INFO")
+    log(f"{COLOR['INFO']}Verificando configuración...{COLOR['RESET']}", "INFO")
 
     # 1. Verificar si el archivo config.ini existe
     if not os.path.exists('config.ini'):
-        log("[❌ ERROR] El archivo config.ini no existe.", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] El archivo config.ini no existe.{COLOR['RESET']}", "ERROR")
         sys.exit(1)
 
     # 2. Leer el archivo config.ini
     try:
         config.read('config.ini')
     except configparser.Error as e:
-        log(f"[❌ ERROR] Error al leer config.ini: {e}", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Error al leer config.ini: {e}{COLOR['RESET']}", "ERROR")
         sys.exit(1)
 
     # 3. Verificar secciones obligatorias
     required_sections = ['DNS', 'Server', 'Security']
     for section in required_sections:
         if section not in config:
-            log(f"[❌ ERROR] Falta la sección obligatoria '{section}' en config.ini.", "ERROR")
+            log(f"{COLOR['ERROR']}[❌ ERROR] Falta la sección obligatoria '{section}' en config.ini.{COLOR['RESET']}", "ERROR")
             sys.exit(1)
 
     # 4. Validar sección [DNS]
     if 'Servers' not in config['DNS']:
-        log("[❌ ERROR] Falta clave 'Servers' en sección [DNS].", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'Servers' en sección [DNS].{COLOR['RESET']}", "ERROR")
         sys.exit(1)
     doh_servers = config['DNS']['Servers'].split(',')
     for server in doh_servers:
         parsed_url = urlparse(server.strip())
         if not (parsed_url.scheme in ['http', 'https'] and parsed_url.netloc):
-            log(f"[❌ ERROR] URL de servidor DoH inválida: {server}", "ERROR")
+            log(f"{COLOR['ERROR']}[❌ ERROR] URL de servidor DoH inválida: {server}{COLOR['RESET']}", "ERROR")
             sys.exit(1)
-    log(f"[✅ OK] Servidores DoH válidos: {len(doh_servers)} configurados.", "INFO")
+    log(f"{COLOR['SUCCESS']}[✅ OK] Servidores DoH válidos: {len(doh_servers)} configurados.{COLOR['RESET']}", "INFO")
 
     if 'AllowedQtypes' not in config['DNS']:
-        log("[❌ ERROR] Falta clave 'AllowedQtypes' en sección [DNS].", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'AllowedQtypes' en sección [DNS].{COLOR['RESET']}", "ERROR")
         sys.exit(1)
     allowed_qtypes = config['DNS']['AllowedQtypes'].split(',')
     valid_qtypes = {'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'HTTPS'}
     for qtype in allowed_qtypes:
         if qtype.strip() not in valid_qtypes:
-            log(f"[❌ ERROR] Tipo de consulta inválido en AllowedQtypes: {qtype}", "ERROR")
+            log(f"{COLOR['ERROR']}[❌ ERROR] Tipo de consulta inválido en AllowedQtypes: {qtype}{COLOR['RESET']}", "ERROR")
             sys.exit(1)
-    log(f"[✅ OK] Tipos de consulta válidos: {allowed_qtypes}", "INFO")
+    log(f"{COLOR['SUCCESS']}[✅ OK] Tipos de consulta válidos: {allowed_qtypes}{COLOR['RESET']}", "INFO")
 
     # 5. Validar sección [Server]
     if 'IP' not in config['Server']:
-        log("[❌ ERROR] Falta clave 'IP' en sección [Server].", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'IP' en sección [Server].{COLOR['RESET']}", "ERROR")
         sys.exit(1)
     ip = config['Server']['IP']
     if ip != '0.0.0.0' and ip != '::':
         try:
             ipaddress.ip_address(ip)
         except ValueError:
-            log(f"[❌ ERROR] Dirección IP inválida: {ip}", "ERROR")
+            log(f"{COLOR['ERROR']}[❌ ERROR] Dirección IP inválida: {ip}{COLOR['RESET']}", "ERROR")
             sys.exit(1)
-    log(f"[✅ OK] IP del servidor válida: {ip}", "INFO")
+    log(f"{COLOR['SUCCESS']}[✅ OK] IP del servidor válida: {ip}{COLOR['RESET']}", "INFO")
 
     if 'Port' not in config['Server']:
-        log("[❌ ERROR] Falta clave 'Port' en sección [Server].", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'Port' en sección [Server].{COLOR['RESET']}", "ERROR")
         sys.exit(1)
     try:
         port = int(config['Server']['Port'])
         if not (0 <= port <= 65535):
             raise ValueError("Fuera de rango")
     except ValueError:
-        log(f"[❌ ERROR] Puerto inválido: {config['Server']['Port']}", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Puerto inválido: {config['Server']['Port']}{COLOR['RESET']}", "ERROR")
         sys.exit(1)
-    log(f"[✅ OK] Puerto válido: {port}", "INFO")
+    log(f"{COLOR['SUCCESS']}[✅ OK] Puerto válido: {port}{COLOR['RESET']}", "INFO")
 
     # 6. Validar sección [Security]
     if 'RateLimit' not in config['Security']:
-        log("[❌ ERROR] Falta clave 'RateLimit' en sección [Security].", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'RateLimit' en sección [Security].{COLOR['RESET']}", "ERROR")
         sys.exit(1)
     try:
         rate_limit = int(config['Security']['RateLimit'])
         if rate_limit < 0:
             raise ValueError("Negativo")
     except ValueError:
-        log(f"[❌ ERROR] RateLimit inválido: {config['Security']['RateLimit']}", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] RateLimit inválido: {config['Security']['RateLimit']}{COLOR['RESET']}", "ERROR")
         sys.exit(1)
-    log(f"[✅ OK] RateLimit válido: {rate_limit}", "INFO")
+    log(f"{COLOR['SUCCESS']}[✅ OK] RateLimit válido: {rate_limit}{COLOR['RESET']}", "INFO")
 
     if 'Blacklist' not in config['Security']:
-        log("[❌ ERROR] Falta clave 'Blacklist' en sección [Security].", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'Blacklist' en sección [Security].{COLOR['RESET']}", "ERROR")
         sys.exit(1)
     blacklist_file = config['Security']['Blacklist']
     if not os.path.exists(blacklist_file):
-        log(f"[⚠️ WARNING] El archivo de lista negra {blacklist_file} no existe.", "WARNING")
+        log(f"{COLOR['WARNING']}[⚠️ WARNING] El archivo de lista negra {blacklist_file} no existe.{COLOR['RESET']}", "WARNING")
     else:
-        log(f"[✅ OK] Archivo de lista negra encontrado: {blacklist_file}", "INFO")
+        log(f"{COLOR['SUCCESS']}[✅ OK] Archivo de lista negra encontrado: {blacklist_file}{COLOR['RESET']}", "INFO")
 
     # 7. Validar opciones booleanas en [Security]
     # StealthMode
     if 'StealthMode' not in config['Security']:
-        log("[❌ ERROR] Falta clave 'StealthMode' en sección [Security].", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'StealthMode' en sección [Security].{COLOR['RESET']}", "ERROR")
         sys.exit(1)
     try:
         stealth_mode = config.getboolean('Security', 'StealthMode')
-        log(f"[✅ OK] StealthMode configurado como: {stealth_mode}", "INFO")
+        log(f"{COLOR['SUCCESS']}[✅ OK] StealthMode configurado como: {stealth_mode}{COLOR['RESET']}", "INFO")
     except ValueError:
-        log(f"[❌ ERROR] Valor inválido para StealthMode: {config['Security']['StealthMode']}", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Valor inválido para StealthMode: {config['Security']['StealthMode']}{COLOR['RESET']}", "ERROR")
         sys.exit(1)
 
     # AllowPrivateIPs
     if 'AllowPrivateIPs' not in config['Security']:
-        log("[❌ ERROR] Falta clave 'AllowPrivateIPs' en sección [Security].", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'AllowPrivateIPs' en sección [Security].{COLOR['RESET']}", "ERROR")
         sys.exit(1)
     try:
         allow_private_ips = config.getboolean('Security', 'AllowPrivateIPs')
-        log(f"[✅ OK] AllowPrivateIPs configurado como: {allow_private_ips}", "INFO")
+        log(f"{COLOR['SUCCESS']}[✅ OK] AllowPrivateIPs configurado como: {allow_private_ips}{COLOR['RESET']}", "INFO")
         if allow_private_ips:
-            log("[⚠️ WARNING] AllowPrivateIPs está habilitado, esto puede permitir DNS Rebinding.", "WARNING")
+            log(f"{COLOR['WARNING']}[⚠️ WARNING] AllowPrivateIPs está habilitado, esto puede permitir DNS Rebinding.{COLOR['RESET']}", "WARNING")
     except ValueError:
-        log(f"[❌ ERROR] Valor inválido para AllowPrivateIPs: {config['Security']['AllowPrivateIPs']}", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Valor inválido para AllowPrivateIPs: {config['Security']['AllowPrivateIPs']}{COLOR['RESET']}", "ERROR")
         sys.exit(1)
 
     # EnableURLBlocking (nueva validación)
     if 'EnableURLBlocking' not in config['Security']:
-        log("[❌ ERROR] Falta clave 'EnableURLBlocking' en sección [Security].", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'EnableURLBlocking' en sección [Security].{COLOR['RESET']}", "ERROR")
         sys.exit(1)
     try:
         enable_url_blocking = config.getboolean('Security', 'EnableURLBlocking')
-        log(f"[✅ OK] EnableURLBlocking configurado como: {enable_url_blocking}", "INFO")
+        log(f"{COLOR['SUCCESS']}[✅ OK] EnableURLBlocking configurado como: {enable_url_blocking}{COLOR['RESET']}", "INFO")
         if enable_url_blocking:
             blocked_urls_file = 'blocked_urls.txt'
             if not os.path.exists(blocked_urls_file):
-                log(f"[⚠️ WARNING] El archivo de URLs bloqueadas {blocked_urls_file} no existe.", "WARNING")
+                log(f"{COLOR['WARNING']}[⚠️ WARNING] El archivo de URLs bloqueadas {blocked_urls_file} no existe.{COLOR['RESET']}", "WARNING")
             else:
-                log(f"[✅ OK] Archivo de URLs bloqueadas encontrado: {blocked_urls_file}", "INFO")
+                log(f"{COLOR['SUCCESS']}[✅ OK] Archivo de URLs bloqueadas encontrado: {blocked_urls_file}{COLOR['RESET']}", "INFO")
     except ValueError:
-        log(f"[❌ ERROR] Valor inválido para EnableURLBlocking: {config['Security']['EnableURLBlocking']}", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Valor inválido para EnableURLBlocking: {config['Security']['EnableURLBlocking']}{COLOR['RESET']}", "ERROR")
         sys.exit(1)
 
     # 8. Validar AllowedNetworks (opcional)
@@ -1175,105 +1272,161 @@ def run_tests():
             try:
                 ipaddress.ip_network(net.strip())
             except ValueError:
-                log(f"[❌ ERROR] Red inválida en AllowedNetworks: {net}", "ERROR")
+                log(f"{COLOR['ERROR']}[❌ ERROR] Red inválida en AllowedNetworks: {net}{COLOR['RESET']}", "ERROR")
                 sys.exit(1)
-        log(f"[✅ OK] Redes permitidas válidas: {allowed_networks}", "INFO")
+        log(f"{COLOR['SUCCESS']}[✅ OK] Redes permitidas válidas: {allowed_networks}{COLOR['RESET']}", "INFO")
     else:
-        log("[⚠️ WARNING] AllowedNetworks vacío, acceso público permitido.", "WARNING")
+        log(f"{COLOR['WARNING']}[⚠️ WARNING] AllowedNetworks vacío, acceso público permitido.{COLOR['RESET']}", "WARNING")
 
     # 9. Validar sección [AdBlocking] y EnableAdBlocking
     if 'AdBlocking' in config:
         if 'EnableAdBlocking' not in config['AdBlocking']:
-            log("[❌ ERROR] Falta clave 'EnableAdBlocking' en sección [AdBlocking].", "ERROR")
+            log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'EnableAdBlocking' en sección [AdBlocking].{COLOR['RESET']}", "ERROR")
             sys.exit(1)
         try:
             enable_ad_blocking = config.getboolean('AdBlocking', 'EnableAdBlocking')
-            log(f"[✅ OK] EnableAdBlocking configurado como: {enable_ad_blocking}", "INFO")
+            log(f"{COLOR['SUCCESS']}[✅ OK] EnableAdBlocking configurado como: {enable_ad_blocking}{COLOR['RESET']}", "INFO")
         except ValueError:
-            log(f"[❌ ERROR] Valor inválido para EnableAdBlocking: {config['AdBlocking']['EnableAdBlocking']}", "ERROR")
+            log(f"{COLOR['ERROR']}[❌ ERROR] Valor inválido para EnableAdBlocking: {config['AdBlocking']['EnableAdBlocking']}{COLOR['RESET']}", "ERROR")
             sys.exit(1)
 
         if enable_ad_blocking:
             if 'AdBlockLists' not in config['AdBlocking']:
-                log("[❌ ERROR] Falta clave 'AdBlockLists' en sección [AdBlocking] cuando EnableAdBlocking es True.", "ERROR")
+                log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'AdBlockLists' en sección [AdBlocking] cuando EnableAdBlocking es True.{COLOR['RESET']}", "ERROR")
                 sys.exit(1)
             adblock_lists = config.get('AdBlocking', 'AdBlockLists', fallback='').split(',')
             for url in adblock_lists:
                 parsed_url = urlparse(url.strip())
                 if not (parsed_url.scheme in ['http', 'https'] and parsed_url.netloc):
-                    log(f"[❌ ERROR] URL de lista de AdBlocking inválida: {url}", "ERROR")
+                    log(f"{COLOR['ERROR']}[❌ ERROR] URL de lista de AdBlocking inválida: {url}{COLOR['RESET']}", "ERROR")
                     sys.exit(1)
-            log(f"[✅ OK] Listas de AdBlocking válidas: {adblock_lists}", "INFO")
+            log(f"{COLOR['SUCCESS']}[✅ OK] Listas de AdBlocking válidas: {adblock_lists}{COLOR['RESET']}", "INFO")
     else:
-        log("[⚠️ WARNING] Sección [AdBlocking] no encontrada, asumiendo AdBlocking desactivado.", "WARNING")
+        log(f"{COLOR['WARNING']}[⚠️ WARNING] Sección [AdBlocking] no encontrada, asumiendo AdBlocking desactivado.{COLOR['RESET']}", "WARNING")
         
     if 'interface_name' not in config['Network']:
-        log("[❌ ERROR] Falta clave 'interface_name' en sección [Network].", "ERROR")
+        log(f"{COLOR['ERROR']}[❌ ERROR] Falta clave 'interface_name' en sección [Network].{COLOR['RESET']}", "ERROR")
     else:
         interface_name = config['Network']['interface_name']
         
         if is_valid_interface(interface_name):
-            log(f"[✅ OK] Nombre de interfaz válido: {interface_name}", "INFO")
+            log(f"{COLOR['SUCCESS']}[✅ OK] Nombre de interfaz válido: {interface_name}{COLOR['RESET']}", "INFO")
         else:
-            log(f"[❌ ERROR] Nombre de interfaz inválido: {interface_name}", "ERROR")
+            log(f"{COLOR['ERROR']}[❌ ERROR] Nombre de interfaz inválido: {interface_name}{COLOR['RESET']}", "ERROR")
             sys.exit(1)
         
-
     # 10. Éxito si no hay errores
-    log("Configuración verificada correctamente.", "SUCCESS")
+    log(f"{COLOR['SUCCESS']}Configuración verificada correctamente.{COLOR['RESET']}", "SUCCESS")
     sys.exit(0)
+
     
 def flush_dns_cache():
     subprocess.run(["ipconfig", "/flushdns"], capture_output=True, text=True, check=True)
     log("DNS Cache de Windows limpiada.", "INFO")
-    log("Para asegurar que el script funcione correctamente, limpia la caché DNS de tu navegador manualmente.", "INFO")
-    log("Instrucciones para navegadores comunes:", "INFO")
-    log("- Google Chrome: Abre chrome://net-internals/#dns y haz clic en 'Clear host cache'.", "INFO")
-    log("- Mozilla Firefox: Abre about:config, busca 'network.dnsCacheExpiration', establece un valor bajo (como 1) y reinicia el navegador.", "INFO")
-    log("- Microsoft Edge: Abre edge://net-internals/#dns y haz clic en 'Clear host cache'.", "INFO")
-    log("Alternativamente, cierra y vuelve a abrir tu navegador o usa una ventana de incógnito.", "INFO")
 
-# Verificar si el sistema operativo soporta SIGHUP antes de intentar registrar la señal
-if platform.system() != "Windows":
-    signal.signal(signal.SIGHUP, reload_config)
-else:
-    log("[⚠️ ERROR] SIGHUP no disponible en este sistema.", "ERROR")
+def clean_dns_cache_webbrowser_help():
+    help_text = f"""
+{COLOR['BOLD']}{COLOR['UNDERLINE']}{COLOR['CYAN']}═══════════════════════════════════════════════════════
+📌 Instrucciones para limpiar la caché DNS del navegador
+═══════════════════════════════════════════════════════{COLOR['RESET']}
+
+{COLOR['BOLD']}{COLOR['BG_BLUE']}{COLOR['WHITE']} 🌐 Google Chrome: {COLOR['RESET']}  
+   {COLOR['INFO']}1️⃣ Abre {COLOR['BOLD']}chrome://net-internals/#dns{COLOR['RESET']}{COLOR['INFO']} en la barra de direcciones.  
+   2️⃣ Haz clic en {COLOR['BOLD']}'Clear host cache'.{COLOR['RESET']}
+
+{COLOR['BOLD']}{COLOR['BG_MAGENTA']}{COLOR['WHITE']} 🦊 Mozilla Firefox: {COLOR['RESET']}  
+   {COLOR['INFO']}1️⃣ Abre {COLOR['BOLD']}about:config{COLOR['RESET']}{COLOR['INFO']}.  
+   2️⃣ Busca {COLOR['BOLD']}'network.dnsCacheExpiration'{COLOR['RESET']}{COLOR['INFO']}.  
+   3️⃣ Establece un valor bajo (como 1) y reinicia el navegador.{COLOR['RESET']}
+
+{COLOR['BOLD']}{COLOR['BG_CYAN']}{COLOR['BLACK']} 🔵 Microsoft Edge: {COLOR['RESET']}  
+   {COLOR['INFO']}1️⃣ Abre {COLOR['BOLD']}edge://net-internals/#dns{COLOR['RESET']}{COLOR['INFO']}.  
+   2️⃣ Haz clic en {COLOR['BOLD']}'Clear host cache'.{COLOR['RESET']}
+
+{COLOR['BOLD']}{COLOR['BG_YELLOW']}{COLOR['BLACK']} 💡 Alternativa General: {COLOR['RESET']}  
+   {COLOR['SUCCESS']}✔️ Cierra y vuelve a abrir tu navegador.  
+   ✔️ Usa una ventana de incógnito para evitar caché persistente.{COLOR['RESET']}
+
+{COLOR['BOLD']}{COLOR['UNDERLINE']}{COLOR['CYAN']}═══════════════════════════════════════════════════════{COLOR['RESET']}
+"""
+    print(help_text)
 
 if __name__ == "__main__":
-    if "--help" in sys.argv:
+    if "--help" in sys.argv or "-h" in sys.argv:
         show_help()
         sys.exit(0)
     
-    if "--test" in sys.argv:
+    if "--test" in sys.argv or "-t" in sys.argv:
         run_tests()
         sys.exit(0)
     
-    flush_dns_cache()
-    stunnel_proc = iniciar_stunnel()
-    
-    if set_windows_dns(IP, PORT):
-        log(f"Proxy DNS configurado en {IP}:{PORT} y DNS de Windows actualizado.", "SUCCESS")
-    else:
-        log("No se pudo configurar el DNS de Windows. Continuando sin cambios.", "WARNING")
+    if "--flush-dns" in sys.argv or "-f" in sys.argv:
+        clean_dns_cache_webbrowser_help()
+        sys.exit(0)
         
-    start_dns_server()
+    if "--interface" in sys.argv or "-i" in sys.argv:
+        show_interfaces()
+        sys.exit(0)
+        
+    if "--show-config" in sys.argv or "-sc" in sys.argv:
+        show_config()
+        sys.exit(0)
+        
+    if "--config" in sys.argv or "-c" in sys.argv:
+        configure_script()
+        sys.exit(0)
+    
+    if "--start" in sys.argv or "-s" in sys.argv:
+        log("Iniciando servidor DNS...", "INFO")
+        
+        threading.Thread(target=update_threat_list, daemon=True).start()
+        
+        if ENABLE_AD_BLOCKING:
+            threading.Thread(target=update_adblock_list, daemon=True).start()
+        
+        load_blocked_urls()
+        
+        threading.Thread(target=update_server_latencies, daemon=True).start()
+        
+        blocked_ips = cargar_ips_bloqueadas()
+        
+        # Iniciar Flask en un hilo separado
+        flask_thread = threading.Thread(target=run_flask)
+        flask_thread.daemon = True
+        flask_thread.start()
+        
+        # Verificar si el sistema operativo soporta SIGHUP antes de intentar registrar la señal
+        if platform.system() != "Windows":
+            signal.signal(signal.SIGHUP, reload_config)
+        else:
+            log("[⚠️ ERROR] SIGHUP no disponible en este sistema.", "ERROR")
+    
+        flush_dns_cache()
+        stunnel_proc = iniciar_stunnel()
+        
+        if set_windows_dns(IP, PORT):
+            log(f"Proxy DNS configurado en {IP}:{PORT} y DNS de Windows actualizado.", "SUCCESS")
+        else:
+            log("No se pudo configurar el DNS de Windows. Continuando sin cambios.", "WARNING")
+            
+        start_dns_server()
 
-    try:
-        while flask_app_running:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        log("🔴 Servidor detenido por el usuario.", "INFO")
-        print_stats()
-        if server:
-            server.shutdown()
-            server.server_close()
-            server_thread.join(timeout=2)
-        if stunnel_proc:
-            stunnel_proc.terminate()
-            log("stunnel detenido", "INFO")
-        reset_windows_dns()
-    finally:
-        if stunnel_proc:
-            stunnel_proc.terminate()
-            log("stunnel detenido", "INFO")
-        reset_windows_dns()
+        try:
+            while flask_app_running:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            log("🔴 Servidor detenido por el usuario.", "INFO")
+            print_stats()
+            if server:
+                server.shutdown()
+                server.server_close()
+                server_thread.join(timeout=2)
+            if stunnel_proc:
+                stunnel_proc.terminate()
+                log("stunnel detenido", "INFO")
+            reset_windows_dns()
+        finally:
+            if stunnel_proc:
+                stunnel_proc.terminate()
+                log("stunnel detenido", "INFO")
+            reset_windows_dns()
