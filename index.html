@@ -200,7 +200,9 @@
             <button class="button" onclick="runDnsLeakTest()">Prueba de Fuga DNS</button>
             <div id="dns-leak-result" class="card" style="display: none;">
                 <h3>Resultados de la Prueba de Fuga DNS</h3>
-                <ul id="dns-leak-results-list"></ul>  <!-- Agregado el contenedor de lista -->
+                <ul id="dns-leak-results-list">
+                    <!-- Aquí se añadirán los resultados de los servidores -->
+                </ul>
                 <p><strong>Mensaje:</strong> <span id="dns-leak-message"></span></p>
                 <p><strong>Servidores Configurados:</strong> <span id="configured-servers"></span></p>
                 <p><strong>Recomendación:</strong> <span id="dns-leak-recommendation"></span></p>
@@ -579,52 +581,42 @@
             try {
                 const response = await fetch('/dns_leak_test');
                 const data = await response.json();
-        
-                // Verificar la respuesta completa
-                console.log('Respuesta del servidor:', data);
-        
-                // Muestra el resultado
+                
+                // Verificar que `configured_servers` esté presente en la respuesta
+                if (!data.configured_servers || data.configured_servers.length === 0) {
+                    throw new Error("No se encontraron servidores DNS configurados en la respuesta.");
+                }
+                
+                // Obtener el contenedor de resultados
                 const resultContainer = document.getElementById('dns-leak-result');
                 const resultsList = document.getElementById('dns-leak-results-list');
-        
-                // Verificar si resultsList está presente
-                if (!resultsList) {
-                    console.error('El elemento "dns-leak-results-list" no se encuentra en el DOM.');
-                    return;
-                }
-        
-                // Limpiar los resultados anteriores
+                
+                // Limpiar resultados anteriores
                 resultsList.innerHTML = '';
         
-                if (data.configured_servers && data.configured_servers.length > 0) {
-                    // Mostrar servidores configurados
-                    document.getElementById('configured-servers').textContent = data.configured_servers.join(', ');
+                // Mostrar mensaje, servidores configurados y recomendación
+                document.getElementById('dns-leak-message').textContent = data.message;
+                document.getElementById('configured-servers').textContent = data.configured_servers.join(', ');
+                document.getElementById('dns-leak-recommendation').textContent = data.recommendation;
         
-                    // Mostrar resultados
-                    data.results.forEach(result => {
-                        const listItem = document.createElement('li');
-                        if (result.error) {
-                            listItem.textContent = `Servidor ${result.server}: Error - ${result.error}`;
-                            listItem.style.color = 'red';
-                        } else {
-                            listItem.textContent = `Servidor ${result.server}: Respuesta - ${result.response}`;
-                            listItem.style.color = 'green';
-                        }
-                        resultsList.appendChild(listItem);
-                    });
+                // Recorrer los resultados y mostrar en la lista
+                data.results.forEach(result => {
+                    const listItem = document.createElement('li');
+                    if (result.error) {
+                        listItem.textContent = `Servidor ${result.server}: Error - ${result.error}`;
+                        listItem.style.color = 'red';
+                    } else {
+                        listItem.textContent = `Servidor ${result.server}: Respuesta - ${result.response}`;
+                        listItem.style.color = 'green';
+                    }
+                    resultsList.appendChild(listItem);
+                });
         
-                    // Mostrar los resultados en el contenedor
-                    resultContainer.style.display = 'block'; // Hacer visible el contenedor de resultados
-                } else {
-                    alert('No se obtuvo respuesta de los servidores DNS.');
-                }
-        
-                // Mostrar mensaje de fuga DNS
-                document.getElementById('dns-leak-message').textContent = data.message || 'No se pudo obtener el mensaje.';
-                document.getElementById('dns-leak-recommendation').textContent = data.recommendation || 'Visita dnsleaktest.com para realizar una prueba completa desde tu navegador.';
+                // Mostrar el contenedor de resultados
+                resultContainer.style.display = 'block';
             } catch (error) {
                 console.error('Error al realizar la prueba de fuga DNS:', error);
-                alert('Hubo un error al intentar realizar la prueba.');
+                alert('Hubo un error al intentar realizar la prueba. Detalles: ' + error.message);
             }
         };
 
