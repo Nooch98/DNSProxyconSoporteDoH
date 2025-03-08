@@ -25,6 +25,7 @@ from collections import defaultdict
 from dnslib import DNSRecord, QTYPE
 from cachetools import TTLCache
 from dns.dnssec import validate
+from dns.message import from_wire
 from urllib.parse import urlparse
 
 # 🎨 Colores para la salida en terminal
@@ -38,14 +39,7 @@ COLOR = {
 query_count = defaultdict(int)  # Contador de consultas por IP
 blocked_domains = set()  # Lista negra de dominios
 blocked_urls_domains = set()
-with open("blocked_urls.txt", "r") as f:
-    for line in f:
-        url = line.strip()
-        domain = urlparse(url).hostname or url  # Extrae el dominio de la URL
-        if domain:
-            blocked_urls_domains.add(domain)
-
-print(blocked_urls_domains)
+connected_ips = set()
 success_count = 0
 error_count = 0
 total_query_time = 0
@@ -59,6 +53,7 @@ stats = {
     "total_resolved": 0,
     "total_failed": 0,
     "blocked_domains_count": len(blocked_domains),
+    "blocked_urls_count": len(blocked_urls_domains),
 }
 
 def show_help():
@@ -97,6 +92,7 @@ def show_help():
   {COLOR['MAGENTA']}✅ Soporta A, AAAA, CNAME, MX, TXT, NS, SOA, HTTPS con DNSSEC.{COLOR['RESET']}
   {COLOR['MAGENTA']}✅ Caché local para mejorar rendimiento (1000 entradas, TTL 1 hora).{COLOR['RESET']}
   {COLOR['MAGENTA']}✅ Registro detallado en dns_proxy.log.{COLOR['RESET']}
+  {COLOR['MAGENTA']}✅ Registro de las IP que se conectan al servidor.{COLOR['RESET']}
   {COLOR['MAGENTA']}✅ Reintentos automáticos ante fallos.{COLOR['RESET']}
   {COLOR['MAGENTA']}✅ Protección contra DNS malicioso y amplificación (ideal para VPS públicos).{COLOR['RESET']}
   {COLOR['MAGENTA']}✅ Configuración dinámica sin reinicio.{COLOR['RESET']}
@@ -120,7 +116,7 @@ def create_default_config():
         'AllowedQtypes': 'A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS'
     }
     config['Server'] = {'IP': '127.0.0.1', 'Port': '53'}
-    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True', "ThreatUpdateInterval": "86400", 'AllowedNetworks': '', 'MaxResponseSize': '512', 'EnableAntiAmplification': 'True'}
+    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True', "ThreatUpdateInterval": "86400", 'AllowedNetworks': '', 'MaxResponseSize': '512', 'EnableAntiAmplification': 'True', 'EnableURLBlocking': 'False'}
     config['AdBlocking'] = {'EnableAdBlocking': 'False', 'AdBlockLists': 'https://easylist.to/easylist/easylist.txt', 'UpdateInterval': '86400'}
     config['Logging'] = {'LogFile': 'dns_proxy.log'}
     config['Web'] = {'Username': 'admin', 'Password': 'secret'}
@@ -166,8 +162,7 @@ if os.path.exists(BLACKLIST_FILE):
 SUCCESS_LEVEL = 25
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
 logging.basicConfig(filename=config['Logging']['LogFile'], level=logging.INFO,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
-
+                    format="%(asctime)s - [%(levelname)s] - %(message)s")
 
 STEALTH_MODE = config.getboolean('Security', 'StealthMode')
 BLOCKED_IPS_FILE = "blocked_ips.txt"
@@ -179,15 +174,29 @@ server = None
 server_thread = None
 flask_app_running = True
 
+if os.path.exists('connected_ips.txt'):
+    with open('connected_ips.txt', 'r') as f:
+        connected_ips.update(line.strip() for line in f if line.strip())
+        
+def log_connected_ip(ip):
+    if ip not in connected_ips:
+        connected_ips.add(ip)
+        with open('connected_ips.txt', 'a') as f:
+            f.write(ip + "\n")
+        log(f"[📡 NUEVA CONEXIÓN] IP registrada: {ip}", "INFO")
+
 def log(message, level="INFO"):
     global stats
 
     # Actualizar estadísticas
     if "consultas exitosas" in message:
         stats["total_resolved"] += 1
+        success_count +=1
     elif "consultas fallidas" in message:
         stats["total_failed"] += 1
+        error_count += 1
     stats["total_queries"] += 1
+    stats["blocked_domains_count"] = len(blocked_domains)
     
     # Obtener el timestamp y color según el nivel de log
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -369,7 +378,7 @@ def cargar_ips_bloqueadas():
             return set(f.read().splitlines())
     return set()
 
-def send_doh_request(doh_query, headers, retries=3, delay=2):
+def send_doh_request(doh_query, headers, retries=3, delay=2, verify=True):
     global success_count, error_count, total_query_time
     
     for server in DOH_SERVERS:
@@ -428,6 +437,7 @@ class DNSProxy(socketserver.BaseRequestHandler):
     def handle(self):
         client_ip = self.client_address[0]
         query_count[client_ip] += 1
+        log_connected_ip(client_ip)
         
         if ALLOWED_NETWORKS:
             client_ip_obj = ipaddress.ip_address(client_ip)
@@ -454,8 +464,9 @@ class DNSProxy(socketserver.BaseRequestHandler):
         qname = str(request.q.qname).rstrip('.')  # Eliminar el punto final para consistencia
         qtype = QTYPE.get(request.q.qtype, "UNKNOWN")
         
+        log(f"[🔍 CONSULTA] {qname} ({qtype}) desde {client_ip}", "INFO")
+        
         # Bloqueo por URL
-        log(f"[DEBUG] Chequeando bloqueo para {qname}", "INFO")
         if ENABLE_URL_BLOCKING and any(qname.endswith(blocked_domain) for blocked_domain in blocked_urls_domains):
             log(f"[🚫 URL BLOCK] Consulta bloqueada para {qname} (URL restringida)")
             reply = request.reply()
@@ -469,10 +480,8 @@ class DNSProxy(socketserver.BaseRequestHandler):
             reply = request.reply()
             reply.header.rcode = 3  # NXDOMAIN
             response_data = reply.pack()
-            log(f"[DEBUG] Enviando NXDOMAIN para {qname} - Tamaño: {len(response_data)} bytes", "INFO")
             try:
                 sock.sendto(response_data, self.client_address)
-                log(f"[DEBUG] NXDOMAIN enviado exitosamente para {qname}", "INFO")
             except Exception as e:
                 log(f"[❌ ERROR] Fallo al enviar NXDOMAIN para {qname}: {e}", "ERROR")
             return
@@ -514,7 +523,7 @@ class DNSProxy(socketserver.BaseRequestHandler):
 
         doh_query = request.pack()
         headers = {"Accept": "application/dns-message", "Content-Type": "application/dns-message"}
-        response = send_doh_request(doh_query, headers, retries=3)
+        response = send_doh_request(doh_query, headers, retries=3, verify=True)
         
         if response:
             try:
@@ -523,7 +532,7 @@ class DNSProxy(socketserver.BaseRequestHandler):
                 query_duration = end_time - start_time
                 ttl = min(rr.ttl for rr in dns_response.rr) if dns_response.rr else 3600
                 try:
-                    validate(dns_response, request)
+                    validate(from_wire(dns_response), from_wire(request))
                     log("[🔒 DNSSEC] Respuesta validada", "SUCCESS")
                 except Exception as e:
                     log(f"[⚠️ DNSSEC] Validación fallida para {qname}: {e}", "WARNING")
@@ -536,8 +545,9 @@ class DNSProxy(socketserver.BaseRequestHandler):
                     resolved_ip = "HTTPS Record"
                 else:
                     resolved_ip = "No IP"
-                
-                log(f"[✅ RESPUESTA] {qname} ({qtype}) → Resolución: {resolved_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
+                    
+                response_ip = resolved_ip if resolved_ip else "No IP"
+                log(f"[✅ RESPUESTA] {qname} ({qtype}) → Resolución: {response_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
                 response_data = dns_response.pack()
                 
                 if qtype in ['A', 'AAAA']:
