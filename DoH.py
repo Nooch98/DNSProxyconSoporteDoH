@@ -18,6 +18,9 @@ import subprocess
 import ipaddress
 import urllib.request
 import base64
+import dnslib
+import dns.message
+import dns.dnssec
 from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, abort
 from functools import wraps
 from socketserver import ThreadingUDPServer
@@ -37,7 +40,7 @@ COLOR = {
 
 # Variables globales
 query_count = defaultdict(int)  # Contador de consultas por IP
-blocked_domains = set()
+blocked_domains = set()  # Lista negra de dominios
 blocked_urls_domains = set()
 connected_ips = set()
 success_count = 0
@@ -378,6 +381,16 @@ def cargar_ips_bloqueadas():
             return set(f.read().splitlines())
     return set()
 
+def validar_dnssec(dns_response, request, qname):
+    try:
+        request_message = dns.message.from_wire(request.pack())
+        dns.dnssec.validate(dns_response, request_message)
+        log(f"[🔒 DNSSEC] Respuesta validada correctamente para {qname}", "SUCCESS")
+        return True
+    except Exception as e:
+        log(f"[⚠️ DNSSEC] Validación fallida para {qname}: {str(e)}", "WARNING")
+        return False
+
 def send_doh_request(doh_query, headers, retries=3, delay=2, verify=True):
     global success_count, error_count, total_query_time
     
@@ -527,33 +540,49 @@ class DNSProxy(socketserver.BaseRequestHandler):
         
         if response:
             try:
-                dns_response = DNSRecord.parse(response)
+                dns_response = dns.message.from_wire(response)
                 end_time = time.time()
                 query_duration = end_time - start_time
-                ttl = min(rr.ttl for rr in dns_response.rr) if dns_response.rr else 3600
-                try:
-                    validate(from_wire(dns_response), from_wire(request))
-                    log("[🔒 DNSSEC] Respuesta validada", "SUCCESS")
-                except Exception as e:
-                    log(f"[⚠️ DNSSEC] Validación fallida para {qname}: {e}", "WARNING")
+                ttl = min(rr.ttl for rr in dns_response.answer) if dns_response.answer else 3600
                 
-                if qtype == 'A' and dns_response.get_a():
-                    resolved_ip = str(dns_response.get_a().rdata)
-                elif qtype == 'AAAA' and any(r.rtype == QTYPE.AAAA for r in dns_response.rr):
-                    resolved_ip = str(next(r.rdata for r in dns_response.rr if r.rtype == QTYPE.AAAA))
-                elif qtype == 'HTTPS' and any(r.rtype == QTYPE.HTTPS for r in dns_response.rr):
-                    resolved_ip = "HTTPS Record"
+                has_dnssec = any(rr.rdtype in [dns.rdatatype.RRSIG, dns.rdatatype.DNSKEY] for rr in dns_response.answer)
+                if has_dnssec:
+                    if not validar_dnssec(dns_response, request, qname):
+                        log(f"[⚠️ DNSSEC] Rechazando respuesta no válida para {qname}", "WARNING")
+                        reply = request.reply()
+                        reply.header.rcode = 2  # SERVFAIL
+                        sock.sendto(reply.pack(), self.client_address)
+                        return
                 else:
+                    log(f"[ℹ️ DNSSEC] No se encontraron registros DNSSEC para {qname}, omitiendo validación", "INFO")
+                
+                resolved_ip = None
+                if qtype == 'A':
+                    for rrset in dns_response.answer:
+                        if rrset.rdtype == dns.rdatatype.A:
+                            resolved_ip = str(rrset[0].address)
+                            break
+                elif qtype == 'AAAA':
+                    for rrset in dns_response.answer:
+                        if rrset.rdtype == dns.rdatatype.AAAA:
+                            resolved_ip = str(rrset[0].address)
+                            break
+                elif qtype == 'HTTPS':
+                    for rrset in dns_response.answer:
+                        if rrset.rdtype == dns.rdatatype.HTTPS:
+                            resolved_ip = "HTTPS Record"
+                            break
+                if resolved_ip is None:
                     resolved_ip = "No IP"
                     
                 response_ip = resolved_ip if resolved_ip else "No IP"
                 log(f"[✅ RESPUESTA] {qname} ({qtype}) → Resolución: {response_ip} - Tiempo: {query_duration:.4f}s", "SUCCESS")
-                response_data = dns_response.pack()
+                response_data = dns_response.to_wire()
                 
                 if qtype in ['A', 'AAAA']:
-                    for rr in dns_response.rr:
-                        if rr.rtype in [QTYPE.A, QTYPE.AAAA]:
-                            ip = str(rr.rdata)
+                    for rrset in dns_response.answer:
+                        if rrset.rdtype in [dns.rdatatype.A, dns.rdatatype.AAAA]:
+                            ip = str(rrset[0].address)
                             if is_private_ip(ip) and not ALLOW_PRIVATE_IPS:
                                 log(f"[🚫 SEGURIDAD] Bloqueado DNS Rebinding para {qname} -> {ip}", "WARNING")
                                 reply = request.reply()
@@ -569,6 +598,13 @@ class DNSProxy(socketserver.BaseRequestHandler):
                 sock.sendto(response_data, self.client_address)
             except Exception as e:
                 log(f"[❌ ERROR] No se pudo parsear respuesta DoH para {qname}: {e}", "ERROR")
+                if isinstance(response, bytes) and len(response) > 12:
+                    log(f"[⚠️ FALLBACK] Enviando respuesta cruda para {qname}", "WARNING")
+                    sock.sendto(response, self.client_address)
+                else:
+                    reply = request.reply()
+                    reply.header.rcode = 2
+                    sock.sendto(reply.pack(), self.client_address)
                 if response:
                     sock.sendto(response[:MAX_RESPONSE_SIZE] if ENABLE_ANTI_AMPLIFICATION else response, self.client_address)
                 else:
