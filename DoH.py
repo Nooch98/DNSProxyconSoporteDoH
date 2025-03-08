@@ -1089,16 +1089,12 @@ def show_config():
     print(f"\n{COLOR['BOLD']}{COLOR['SUCCESS']}Configuración mostrada correctamente.{COLOR['RESET']}")
 
 def configure_script():
-    config = configparser.ConfigParser()
-
-    # Verificamos si el archivo 'config.ini' existe
     if os.path.exists('config.ini'):
         config.read('config.ini')
         print(f"{COLOR['INFO']}Configuración cargada desde 'config.ini'.{COLOR['RESET']}")
     else:
         print(f"{COLOR['WARNING']}No se encontró 'config.ini'. Se creará uno nuevo.{COLOR['RESET']}")
 
-    # Secciones del archivo
     sections = {
         'Network': ['interface_name'],
         'DNS': ['servers', 'allowedqtypes'],
@@ -1108,7 +1104,6 @@ def configure_script():
         'Logging': ['logfile']
     }
 
-    # Interactuar con cada sección y clave en el archivo
     for section, keys in sections.items():
         if not config.has_section(section):
             config.add_section(section)
@@ -1118,18 +1113,17 @@ def configure_script():
         for key in keys:
             current_value = config.get(section, key, fallback=None)
             if current_value:
-                print(f"  Valor actual para {key}: {current_value}")
-            new_value = input(f"Ingrese el nuevo valor para '{key}' (deje en blanco para mantener el valor actual): ")
+                print(f"  {COLOR['GREEN']}Valor actual para {key}: {current_value}{COLOR['RESET']}")
+            new_value = input(f"{COLOR['YELLOW']}Ingrese el nuevo valor para '{key}' (deje en blanco para mantener el valor actual): {COLOR['RESET']}")
 
-            # Si el usuario deja en blanco, no se actualiza el valor
             if new_value:
                 config.set(section, key, new_value)
 
-    # Guardamos la configuración en el archivo 'config.ini'
     with open('config.ini', 'w') as configfile:
         config.write(configfile)
 
     print(f"\n{COLOR['SUCCESS']}Configuración guardada en 'config.ini'.{COLOR['RESET']}")
+
 
 def run_tests():
     log(f"{COLOR['INFO']}Verificando configuración...{COLOR['RESET']}", "INFO")
