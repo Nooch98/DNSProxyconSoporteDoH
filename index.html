@@ -198,7 +198,13 @@
             <button class="button" onclick="restartServer()">Reiniciar Servidor</button>
             <button class="button" onclick="stopServer()">Detener Servidor</button>
             <button class="button" onclick="runDnsLeakTest()">Prueba de Fuga DNS</button>
-            <div id="dns-leak-result" class="card" style="display: none;"></div>
+            <div id="dns-leak-result" class="card" style="display: none;">
+                <h3>Resultados de la Prueba de Fuga DNS</h3>
+                <ul id="dns-leak-results-list"></ul>  <!-- Agregado el contenedor de lista -->
+                <p><strong>Mensaje:</strong> <span id="dns-leak-message"></span></p>
+                <p><strong>Servidores Configurados:</strong> <span id="configured-servers"></span></p>
+                <p><strong>Recomendación:</strong> <span id="dns-leak-recommendation"></span></p>
+            </div>
             <div id="stats-error" class="alert alert-error" style="display: none;"></div>
         </div>
 
@@ -569,6 +575,59 @@
             }
         };
 
+        async function runDnsLeakTest() {
+            try {
+                const response = await fetch('/dns_leak_test');
+                const data = await response.json();
+        
+                // Verificar la respuesta completa
+                console.log('Respuesta del servidor:', data);
+        
+                // Muestra el resultado
+                const resultContainer = document.getElementById('dns-leak-result');
+                const resultsList = document.getElementById('dns-leak-results-list');
+        
+                // Verificar si resultsList está presente
+                if (!resultsList) {
+                    console.error('El elemento "dns-leak-results-list" no se encuentra en el DOM.');
+                    return;
+                }
+        
+                // Limpiar los resultados anteriores
+                resultsList.innerHTML = '';
+        
+                if (data.configured_servers && data.configured_servers.length > 0) {
+                    // Mostrar servidores configurados
+                    document.getElementById('configured-servers').textContent = data.configured_servers.join(', ');
+        
+                    // Mostrar resultados
+                    data.results.forEach(result => {
+                        const listItem = document.createElement('li');
+                        if (result.error) {
+                            listItem.textContent = `Servidor ${result.server}: Error - ${result.error}`;
+                            listItem.style.color = 'red';
+                        } else {
+                            listItem.textContent = `Servidor ${result.server}: Respuesta - ${result.response}`;
+                            listItem.style.color = 'green';
+                        }
+                        resultsList.appendChild(listItem);
+                    });
+        
+                    // Mostrar los resultados en el contenedor
+                    resultContainer.style.display = 'block'; // Hacer visible el contenedor de resultados
+                } else {
+                    alert('No se obtuvo respuesta de los servidores DNS.');
+                }
+        
+                // Mostrar mensaje de fuga DNS
+                document.getElementById('dns-leak-message').textContent = data.message || 'No se pudo obtener el mensaje.';
+                document.getElementById('dns-leak-recommendation').textContent = data.recommendation || 'Visita dnsleaktest.com para realizar una prueba completa desde tu navegador.';
+            } catch (error) {
+                console.error('Error al realizar la prueba de fuga DNS:', error);
+                alert('Hubo un error al intentar realizar la prueba.');
+            }
+        };
+
         setInterval(() => {
             fetch('/system_stats', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
                 .then(response => response.json())
@@ -587,27 +646,6 @@
             .then(response => response.json())
             .then(data => showToast(data.message, 'success'))
             .catch(err => showToast(`Error al aplicar cambios: ${err}`, 'error'));
-        };
-
-        function runDNSLeakTest() {
-            fetch('/dns_leak_test', { headers: { 'Authorization': 'Basic ' + btoa('admin:secret') } })
-                .then(response => response.json())
-                .then(data => {
-                    const resultDiv = document.getElementById('dns-leak-result');
-                    resultDiv.style.display = 'block';
-                    resultDiv.innerHTML = `
-                        <h3>Resultado de la Prueba de Fugas DNS</h3>
-                        <p>${data.message}</p>
-                        <p>Servidores Configurados: ${data.configured_servers.join(', ')}</p>
-                        <p>${data.recommendation}</p>
-                    `;
-                    showToast('Prueba de fugas DNS completada', 'success');
-                })
-                .catch(err => {
-                    showToast(`Error al realizar la prueba de fugas DNS: ${err}`, 'error');
-                    document.getElementById('dns-leak-result').style.display = 'block';
-                    document.getElementById('dns-leak-result').innerHTML = `<p>Error: ${err}</p>`;
-                });
         };
 
         setInterval(() => {
