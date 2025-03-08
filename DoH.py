@@ -793,6 +793,8 @@ def stop_server():
 # Función log sin dependencia de Flask
 def log(message, level="INFO"):
     global stats, success_count, error_count
+
+    # Actualizar estadísticas
     if "consultas exitosas" in message:
         stats["total_resolved"] += 1
         success_count += 1
@@ -802,18 +804,39 @@ def log(message, level="INFO"):
     stats["total_queries"] += 1
     stats["blocked_domains_count"] = len(blocked_domains)
 
+    # Obtener el timestamp y color según el nivel de log
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    color = COLOR.get(level, COLOR["RESET"])
-    print(f"{color}[{timestamp}] {message}")
-    if level.lower() == "info":
-        logging.info(message)
-    elif level.lower() == "warning":
-        logging.warning(message)
-    elif level.lower() == "error":
-        logging.error(message)
-    elif level.lower() == "success":
-        logging.info(message)
+    
+    # Mapeo de colores según nivel de log
+    level_colors = {
+        "INFO": COLOR["INFO"],
+        "WARNING": COLOR["WARNING"],
+        "ERROR": COLOR["ERROR"],
+        "SUCCESS": COLOR["SUCCESS"],
+        "DEBUG": COLOR["LIGHT_GRAY"],
+        "CRITICAL": COLOR["BG_RED"]
+    }
+    
+    # Determinar el color del mensaje
+    color = level_colors.get(level.upper(), COLOR["RESET"])
 
+    # Mostrar el mensaje en la terminal con formato mejorado
+    print(f"{color}[{timestamp}] [{level.upper()}] {message}{COLOR['RESET']}")
+
+    # Registrar en el log con el método adecuado según el nivel
+    level = level.lower()
+    if level == "info":
+        logging.info(message)
+    elif level == "warning":
+        logging.warning(message)
+    elif level == "error":
+        logging.error(message)
+    elif level == "success":
+        logging.info(f"SUCCESS: {message}")  # 'SUCCESS' se registra como INFO
+    elif level == "debug":
+        logging.debug(message)
+    elif level == "critical":
+        logging.critical(message)
 # Ruta principal
 @app.route('/')
 @requires_auth
@@ -984,18 +1007,22 @@ def get_threat_stats():
         "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - THREAT_UPDATE_INTERVAL))
     })
 
+dns_servers = config.get('DNS', 'servers', fallback='').split(',')
 @app.route('/dns_leak_test', methods=['GET'])
 @requires_auth
 def dns_leak_test():
     try:
-        servers = DOH_SERVERS
+        servers = DOH_SERVERS  # Asegúrate de que esta variable contenga una lista válida de servidores
         return jsonify({
             "message": "Prueba de fuga DNS: las consultas están siendo enrutadas a los siguientes servidores DoH.",
             "configured_servers": servers,
+            "results": [
+                {"server": server, "response": "Respuesta", "error": None} for server in servers
+            ],  # Aquí puedes definir la respuesta para cada servidor, por ejemplo.
             "recommendation": "Visita dnsleaktest.com para una prueba completa desde tu navegador."
         })
     except Exception as e:
-        log(f"[❌ ERROR] Error al generar prueba de fuga DNS: {e}", "ERROR")
+        print(f"Error al realizar la prueba de fuga DNS: {e}")
         return jsonify({"error": f"Error al generar prueba: {str(e)}"}), 500
     
 @app.route('/docs')
@@ -1017,8 +1044,6 @@ def run_flask():
         app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
         if not flask_app_running:
             break
-
-
 
 def print_stats():
     avg_time = total_query_time / success_count if success_count else 0
@@ -1344,6 +1369,13 @@ def clean_dns_cache_webbrowser_help():
 {COLOR['BOLD']}{COLOR['UNDERLINE']}{COLOR['CYAN']}═══════════════════════════════════════════════════════{COLOR['RESET']}
 """
     print(help_text)
+    
+def is_admin():
+    import ctypes
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
 
 if __name__ == "__main__":
     if "--help" in sys.argv or "-h" in sys.argv:
@@ -1371,6 +1403,8 @@ if __name__ == "__main__":
         sys.exit(0)
     
     if "--start" in sys.argv or "-s" in sys.argv:
+        if not is_admin():
+            print(f"{COLOR['ERROR']}Para modificar la configuración DNS de Windows, se necesitan privilegios de administrador. Por favor, ejecute el script como administrador.{COLOR['RESET']}")
         log("Iniciando servidor DNS...", "INFO")
         
         threading.Thread(target=update_threat_list, daemon=True).start()
