@@ -30,10 +30,6 @@ from cachetools import TTLCache
 from dns.dnssec import validate
 from dns.message import from_wire
 from urllib.parse import urlparse
-from colorama import init
-
-
-init(autoreset=True)
 
 # 🎨 Colores para la salida en terminal
 COLOR = {
@@ -778,7 +774,8 @@ def log(message, level="INFO"):
     stats["blocked_domains_count"] = len(blocked_domains)
 
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    print(f"[{timestamp}] {message}")
+    color = COLOR.get(level, COLOR["RESET"])
+    print(f"{color}[{timestamp}] {message}")
     if level.lower() == "info":
         logging.info(message)
     elif level.lower() == "warning":
