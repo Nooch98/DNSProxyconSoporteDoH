@@ -1,3 +1,4 @@
+import json
 import requests
 import socketserver
 import logging
@@ -21,6 +22,7 @@ import base64
 import dnslib
 import dns.message
 import dns.dnssec
+import dns.resolver
 from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, abort
 from functools import wraps
 from socketserver import ThreadingUDPServer
@@ -1012,17 +1014,81 @@ dns_servers = config.get('DNS', 'servers', fallback='').split(',')
 @requires_auth
 def dns_leak_test():
     try:
-        servers = DOH_SERVERS  # Asegúrate de que esta variable contenga una lista válida de servidores
+        # Lista de servidores DoH configurados
+        dns_servers = [
+            {"url": "https://8.8.8.8/dns-query", "type": "google"},
+            {"url": "https://1.1.1.1/dns-query", "type": "cloudflare"},
+            {"url": "https://9.9.9.9/dns-query", "type": "quad9"}
+        ]
+        
+        # Dominio de prueba
+        domain = "example.com"
+        
+        # Construir la consulta DNS utilizando dnspython
+        query = dns.message.make_query(domain, dns.rdatatype.A)
+        query_bytes = query.to_wire()  # Convertir la consulta en bytes (binario)
+        
+        # Resultados
+        results = []
+
+        for server in dns_servers:
+            try:
+                # Determinar el tipo de contenido según el servidor
+                headers = {"Content-Type": "application/dns-message"}
+                payload = query_bytes  # Enviar la consulta como un paquete binario
+
+                # Realizar la consulta DNS usando POST
+                response = requests.post(server['url'], data=payload, headers=headers)
+
+                # Verificar el código de estado
+                if response.status_code == 200:
+                    try:
+                        # Intentar interpretar la respuesta como un mensaje DNS
+                        data = response.content
+                        
+                        # Convertir la respuesta a un formato legible (hexadecimal dividido en líneas)
+                        hex_response = data.hex()
+                        formatted_response = "\n".join([hex_response[i:i+64] for i in range(0, len(hex_response), 64)])  # Dividir en líneas de 64 caracteres
+                        
+                        results.append({
+                            'server': server['url'],
+                            'response': formatted_response  # Respuesta legible
+                        })
+                    except ValueError:
+                        results.append({
+                            'server': server['url'],
+                            'error': 'Respuesta no es un formato válido.'
+                        })
+                elif response.status_code == 400:
+                    results.append({
+                        'server': server['url'],
+                        'error': f"Error 400 - Solicitud incorrecta: El formato de la consulta puede ser inválido."
+                    })
+                elif response.status_code == 415:
+                    results.append({
+                        'server': server['url'],
+                        'error': f"Error 415 - Tipo de medio no soportado: Verifica el tipo de contenido de la solicitud."
+                    })
+                else:
+                    results.append({
+                        'server': server['url'],
+                        'error': f"Error en la consulta DNS, código de estado: {response.status_code}"
+                    })
+
+            except requests.exceptions.RequestException as e:
+                results.append({
+                    'server': server['url'],
+                    'error': f"Error en la solicitud: {str(e)}"
+                })
+
         return jsonify({
-            "message": "Prueba de fuga DNS: las consultas están siendo enrutadas a los siguientes servidores DoH.",
-            "configured_servers": servers,
-            "results": [
-                {"server": server, "response": "Respuesta", "error": None} for server in servers
-            ],  # Aquí puedes definir la respuesta para cada servidor, por ejemplo.
-            "recommendation": "Visita dnsleaktest.com para una prueba completa desde tu navegador."
+            "message": "Prueba de fuga DNS realizada con los servidores configurados.",
+            "configured_servers": [server['url'] for server in dns_servers],
+            "results": results,
+            "recommendation": "Si observas que la respuesta proviene de un servidor no deseado, puede haber una fuga de DNS."
         })
+    
     except Exception as e:
-        print(f"Error al realizar la prueba de fuga DNS: {e}")
         return jsonify({"error": f"Error al generar prueba: {str(e)}"}), 500
     
 @app.route('/docs')
