@@ -83,7 +83,13 @@ pyinstaller --onefile --add-data "stunnel.conf" DoH.py
 ![Captura de pantalla 2025-02-24 210357](https://github.com/user-attachments/assets/69b377c1-feb8-4e80-a8cc-dbaa85c1abd1)
 
 * **Comandos de Línea**:
-  - `--help`: Muestra Info y Ayuda.
+  - `--help` o `-h`: Muestra Info y Ayuda.
+  - `--test` o `-t`: Ejecuta un test que comprueba que la configuracion se valida
+  - `--flush-dns` o `-f`: Elimina la cache DNS del sistema
+  - `--interface` o `-i`: Muestra las interfaces disponibles en tu sistema para poder configurar el script
+  - `--show-config` o `-sc`: Muestra tu configuracion actual
+  - `--config`o `-c`: Lanza la configuracion del script
+  - `--start`o `-s`: Lanza el servidor
 
 # Configuración
 
@@ -92,27 +98,32 @@ El archivo `config.ini` permite personalizar el comportamiento del proxy. Si no 
 ## Ejemplo de `config.ini`
 
 ```ini
+[Network]
+interface_name = Ethernet
+
 [DNS]
-Servers=[https://cloudflare-dns.com/dns-query,https://dns.google/dns-query](https://8.8.8.8/dns-query,https://1.1.1.1/dns-query,https://9.9.9.9/dns-query)
-AllowedQtypes=A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS
+servers = https://8.8.8.8/dns-query,https://1.1.1.1/dns-query,https://9.9.9.9/dns-query
+allowedqtypes = A, AAAA, CNAME, MX, TXT, NS, SOA, HTTPS
 
 [Server]
-IP=127.0.0.1
-Port=53
+ip = 127.0.0.1
+port = 53
 
 [Security]
 ratelimit = 0
 blacklist = blocked_domains.txt
 stealthmode = True
-ThreatUpdateInterval = 86400
-AllowedNetworks=
-MaxResponseSize=512
-EnableAntiAmplification=True
+threatupdateinterval = 86400
+allowednetworks = 
+maxresponsesize = 512
+enableantiamplification = True
+allowprivateips = False
+enableurlblocking = True
 
 [AdBlocking]
-EnableAdBlocking=True
-AdBlockLists=https://easylist.to/easylist/easylist.txt,https://adaway.org/hosts.txt
-UpdateInterval=86400
+enableadblocking = True
+adblocklists = https://easylist.to/easylist/easylist.txt,https://adaway.org/hosts.txt
+updateinterval = 86400
 
 [Logging]
 logfile = dns_proxy.log
