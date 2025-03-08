@@ -37,7 +37,7 @@ COLOR = {
 
 # Variables globales
 query_count = defaultdict(int)  # Contador de consultas por IP
-blocked_domains = set()  # Lista negra de dominios
+blocked_domains = set()
 blocked_urls_domains = set()
 connected_ips = set()
 success_count = 0
