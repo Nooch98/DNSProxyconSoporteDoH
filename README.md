@@ -26,6 +26,7 @@ Un servidor proxy DNS diseñado para evitar bloqueos de ISP, como el de Movistar
 - **Dependencias**:
   - `requests`
   - `dnslib`
+  - `pythondns`
   - `flask`
   - `psutil`
   - `cachetools` (opcional, para caché DNS)
@@ -34,7 +35,7 @@ Un servidor proxy DNS diseñado para evitar bloqueos de ISP, como el de Movistar
 
 Instala las dependencias con:
 ```bash
-pip install requests dnslib flask psutil cachetools
+pip install requests dnslib pythondns flask psutil cachetools
 ```
 
 # Instalación
