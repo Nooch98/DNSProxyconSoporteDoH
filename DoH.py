@@ -114,15 +114,15 @@ def show_help():
     print(help_text)
 
 def create_default_config():
+    config['Network'] = {'InterfaceName': 'Ethernet'}
     config['DNS'] = {
         'Servers': 'https://1.1.1.1/dns-query,https://8.8.8.8/dns-query',
         'AllowedQtypes': 'A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS'
     }
     config['Server'] = {'IP': '127.0.0.1', 'Port': '53'}
-    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True', "ThreatUpdateInterval": "86400", 'AllowedNetworks': '', 'MaxResponseSize': '512', 'EnableAntiAmplification': 'True', 'EnableURLBlocking': 'False'}
+    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True', "ThreatUpdateInterval": "86400", 'AllowedNetworks': '', 'MaxResponseSize': '512', 'EnableAntiAmplification': 'True', 'EnableURLBlocking': 'False', 'AllowPrivateIPs': 'False'}
     config['AdBlocking'] = {'EnableAdBlocking': 'False', 'AdBlockLists': 'https://easylist.to/easylist/easylist.txt', 'UpdateInterval': '86400'}
     config['Logging'] = {'LogFile': 'dns_proxy.log'}
-    config['Web'] = {'Username': 'admin', 'Password': 'secret'}
 
     with open('config.ini', 'w') as configfile:
         config.write(configfile)
