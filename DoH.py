@@ -30,6 +30,10 @@ from cachetools import TTLCache
 from dns.dnssec import validate
 from dns.message import from_wire
 from urllib.parse import urlparse
+from colorama import init
+
+
+init(autoreset=True)
 
 # 🎨 Colores para la salida en terminal
 COLOR = {
@@ -1029,6 +1033,10 @@ def start_dns_server():
     server_thread.start()
     log(f"🔐 Servidor DNS Proxy corriendo en {IP}:{PORT}...", "SUCCESS")
 
+def is_valid_interface(interface_name):
+    available_interfaces = psutil.net_if_addrs().keys()
+    return interface_name in available_interfaces
+
 def run_tests():
     log("Verificando configuración...", "INFO")
 
@@ -1201,6 +1209,18 @@ def run_tests():
             log(f"[✅ OK] Listas de AdBlocking válidas: {adblock_lists}", "INFO")
     else:
         log("[⚠️ WARNING] Sección [AdBlocking] no encontrada, asumiendo AdBlocking desactivado.", "WARNING")
+        
+    if 'interface_name' not in config['Network']:
+        log("[❌ ERROR] Falta clave 'interface_name' en sección [Network].", "ERROR")
+    else:
+        interface_name = config['Network']['interface_name']
+        
+        if is_valid_interface(interface_name):
+            log(f"[✅ OK] Nombre de interfaz válido: {interface_name}", "INFO")
+        else:
+            log(f"[❌ ERROR] Nombre de interfaz inválido: {interface_name}", "ERROR")
+            sys.exit(1)
+        
 
     # 10. Éxito si no hay errores
     log("Configuración verificada correctamente.", "SUCCESS")
