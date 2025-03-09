@@ -487,6 +487,26 @@ def is_ddos_attack(client_ip):
     CLIENT_REQUEST[client_ip].append(now)
     return len(CLIENT_REQUEST[client_ip]) > MAX_REQUEST_PER_SECOND
 
+def block_ddos_attack(client_ip):
+    if not is_ip_blocked(client_ip, BLOCKED_IPS_FILE):
+        with open(BLOCKED_IPS_FILE, "a") as f:
+            f.write(client_ip + "\n")
+        log(f"[ DDoS] IP {client_ip} bloqueada por posible ataque DDoS", "WARNING")
+    else:
+        log(f"[ DDoS] IP {client_ip} ya estaba bloqueada", "INFO")
+
+def is_ip_blocked(client_ip, BLOCKED_IPS_FILE):
+    if not os.path.exists(BLOCKED_IPS_FILE):
+        return False
+    try:
+        with open(BLOCKED_IPS_FILE, "r") as f:
+            for line in f:
+                if line.strip() == client_ip:
+                    return True 
+        return False
+    except FileNotFoundError:
+        return False 
+
 def handle_blocked_domain(request, sock):
     # Crear la respuesta para el dominio bloqueado
     reply = request.reply()
@@ -506,20 +526,23 @@ def handle_blocked_domain(request, sock):
         log(f"[🚫 BLOQUEADO] Consulta para {request.q.qname} redirigida a {blocked_ip}", "WARNING")
     except Exception as e:
         log(f"[❌ ERROR] No se pudo enviar respuesta para {request.q.qname}: {e}", "ERROR")
+        
+def handle_blocked_ip(client_ip):
+    try:
+        logging.warning(f"[ BLOQUEADO] IP {client_ip} bloqueada")
+    except Exception as e:
+        logging.error(f"[❌ ERROR] No se pudo enviar respuesta para IP bloqueada: {e}")
 
 class DNSProxy(socketserver.BaseRequestHandler):
     def handle(self):
         client_ip = self.client_address[0]
         query_count[client_ip] += 1
         log_connected_ip(client_ip)
-        client_location = get_client_location(client_ip)
-        
-        if client_location:
-            log(f"[📍 GEOIP] Ubicación de {client_ip}: {client_location}", "INFO")
         
         if is_ddos_attack(client_ip):
-           log(f"[🌊💥 DDoS] Posible ataque detectado desde {client_ip}", "WARNING")
-           return 
+            log(f"[🌊💥 DDoS] Posible ataque detectado desde {client_ip}", "WARNING")
+            block_ddos_attack(client_ip)
+            return
         
         if ALLOWED_NETWORKS:
             client_ip_obj = ipaddress.ip_address(client_ip)
@@ -529,7 +552,7 @@ class DNSProxy(socketserver.BaseRequestHandler):
         
         if client_ip in blocked_ips:
             log(f"[⛔ BLOQUEADO] {client_ip} intentó conectarse", "WARNING")
-            handle_blocked_domain(request, sock)
+            handle_blocked_ip(client_ip)
             return
 
         if RATE_LIMIT != 0 and query_count[client_ip] > RATE_LIMIT:
