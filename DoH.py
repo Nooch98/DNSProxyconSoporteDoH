@@ -23,6 +23,7 @@ import dnslib
 import dns.message
 import dns.dnssec
 import dns.resolver
+import geoip2.database
 from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, abort
 from functools import wraps
 from socketserver import ThreadingUDPServer
@@ -210,6 +211,8 @@ STEALTH_MODE = config.getboolean('Security', 'StealthMode')
 BLOCKED_IPS_FILE = "blocked_ips.txt"
 ALLOW_PRIVATE_IPS = config.getboolean('Security', 'AllowPrivateIPs', fallback=False)
 ENABLE_URL_BLOCKING = config.getboolean('Security', 'EnableURLBlocking', fallback=False)
+CLIENT_REQUEST = defaultdict(list)
+MAX_REQUEST_PER_SECOND = config.getint('Security', 'MaxRequestPerSecond')
 server_latencies = {server: float('inf') for server in DOH_SERVERS}
 latency_lock = threading.Lock()
 server = None
@@ -468,6 +471,21 @@ def bloquear_ip(ip):
     with open(BLOCKED_IPS_FILE, "a") as f:
         f.write(ip + "\n")
     log(f"[⛔ BLOQUEADO] IP {ip} detectada por posible DNS Tunneling", "WARNING")
+    
+def get_client_location(ip):
+    try:
+        reader = geoip2.database.Reader('GeoLite2-City.mmdb')
+        response = reader.country(ip)
+        return response.country.iso_code
+    except Exception as e:
+        log(f"[❌ GEOIP] Error al obtener ubicación para {ip}: {e}", "ERROR")
+        return None
+    
+def is_ddos_attack(client_ip):
+    now = time.time()
+    CLIENT_REQUEST[client_ip] = [ts for ts in CLIENT_REQUEST[client_ip] if now - ts < 1]
+    CLIENT_REQUEST[client_ip].append(now)
+    return len(CLIENT_REQUEST[client_ip]) > MAX_REQUEST_PER_SECOND
 
 def handle_blocked_domain(request, sock):
     # Crear la respuesta para el dominio bloqueado
@@ -494,6 +512,14 @@ class DNSProxy(socketserver.BaseRequestHandler):
         client_ip = self.client_address[0]
         query_count[client_ip] += 1
         log_connected_ip(client_ip)
+        client_location = get_client_location(client_ip)
+        
+        if client_location:
+            log(f"[📍 GEOIP] Ubicación de {client_ip}: {client_location}", "INFO")
+        
+        if is_ddos_attack(client_ip):
+           log(f"[🌊💥 DDoS] Posible ataque detectado desde {client_ip}", "WARNING")
+           return 
         
         if ALLOWED_NETWORKS:
             client_ip_obj = ipaddress.ip_address(client_ip)
