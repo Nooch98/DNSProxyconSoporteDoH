@@ -89,7 +89,7 @@ pyinstaller --onefile --add-data "stunnel.conf" DoH.py
 * **Comandos de Línea**:
   - `--help` o `-h`: Muestra Info y Ayuda.
   - `--test` o `-t`: Ejecuta un test que comprueba que la configuracion se valida
-  - `--flush-dns` o `-f`: Elimina la cache DNS del sistema
+  - `--flush-dns` o `-f`: Muestra la ayuda para eliminar la cache dns del navegador ya que si bloqueas una url o un dominio podria ser cargado desde la cache del navegador
   - `--interface` o `-i`: Muestra las interfaces disponibles en tu sistema para poder configurar el script
   - `--show-config` o `-sc`: Muestra tu configuracion actual
   - `--config` o `-c`: Lanza la configuracion del script
