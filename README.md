@@ -92,8 +92,9 @@ pyinstaller --onefile --add-data "stunnel.conf" DoH.py
   - `--flush-dns` o `-f`: Elimina la cache DNS del sistema
   - `--interface` o `-i`: Muestra las interfaces disponibles en tu sistema para poder configurar el script
   - `--show-config` o `-sc`: Muestra tu configuracion actual
-  - `--config`o `-c`: Lanza la configuracion del script
-  - `--start`o `-s`: Lanza el servidor
+  - `--config` o `-c`: Lanza la configuracion del script
+  - `--start` o `-s`: Lanza el servidor
+  - `--update` o `-u`: Muestra los cambios o funciones nuevas agregadas al script.
 
 # Configuración
 
