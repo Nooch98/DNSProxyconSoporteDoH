@@ -35,7 +35,6 @@ import configparser
 import socketserver
 import cryptography
 import urllib.request
-import geoip2.database
 from functools import wraps
 from cachetools import TTLCache
 from dns.dnssec import validate
@@ -112,6 +111,7 @@ ENABLE_URL_BLOCKING = config.getboolean('Security', 'EnableURLBlocking', fallbac
 CLIENT_REQUEST = defaultdict(list)
 MAX_REQUEST_PER_SECOND = config.getint('Security', 'MaxRequestPerSecond', fallback=500)
 GLOBAL_RATE_LIMIT = config.getint('Security', 'GlobalRateLimit', fallback=5000)
+CONTROL_PORT = config.getint('Security', 'ControlPanelConect', fallback=5000)
 SUCCESS_LEVEL = 25
 
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
@@ -125,6 +125,8 @@ stats = {
     "blocked_domains_count": len(blocked_domains),
     "blocked_urls_count": len(blocked_urls_domains),
 }
+
+logs = []
 
 # FUNCION LOG PARA MUESTRA DE INFORMACION EN LA TERMINAL
 def log(message, level="INFO"):
@@ -155,7 +157,11 @@ def log(message, level="INFO"):
     
     # Determinar el color del mensaje
     color = level_colors.get(level.upper(), COLOR["RESET"])
+    
+    log_entry = f"[{timestamp}] [{level.upper()}] {message}"
 
+    logs.append(log_entry)
+    
     # Mostrar el mensaje en la terminal con formato mejorado
     print(f"{color}[{timestamp}] [{level.upper()}] {message}{COLOR['RESET']}")
 
@@ -269,10 +275,11 @@ def show_update():
 {COLOR['BOLD']}{COLOR['UNDERLINE']}{COLOR['RED']}    🛠️ CAMBIOS Y ARREGLOS DE LA ACTUALIZACION    {COLOR['RESET']}
 {COLOR['BOLD']}{COLOR['UNDERLINE']}{COLOR['RED']}═════════════════════════════════════════════════════════{COLOR['RESET']}
 
-{COLOR['INFO']}- Se ha reorganizado el codigo dividiendolo por secciones mas claras.{COLOR['RESET']}
+{COLOR['INFO']}- Se ha Agregado la funcion Control_server para conectar el panel de control con el servidor.{COLOR['RESET']}
 
-{COLOR['INFO']}- Se ha agregado esta nueva funcion en la cual se mostraran las actualizaciones del codigo
-usando el comando {COLOR['RESET']}{COLOR['BG_GRAY']}{COLOR['BOLD']}python DoH.py -u{COLOR['RESET']}{COLOR['INFO']}.{COLOR['RESET']}
+{COLOR['INFO']}- Se ha agregado un panel de control nuevo apartado del servidor la idea es que una vez todo 
+mas o menos implementado todo se haga desde la interfaz de panel de control tanto levantar el servidor, pararlo
+configurarlo etc etc{COLOR['RESET']}
 
 {COLOR['BOLD']}{COLOR['UNDERLINE']}{COLOR['CYAN']}═════════════════════════════════════════════════════════{COLOR['RESET']}
 """
@@ -286,7 +293,7 @@ def create_default_config():
         'AllowedQtypes': 'A,AAAA,CNAME,MX,TXT,NS,SOA,HTTPS'
     }
     config['Server'] = {'IP': '127.0.0.1', 'Port': '53'}
-    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True', "ThreatUpdateInterval": "86400", 'AllowedNetworks': '', 'MaxResponseSize': '512', 'EnableAntiAmplification': 'True', 'EnableURLBlocking': 'False', 'AllowPrivateIPs': 'False', 'MaxRequestPerSecond': '500', 'GlobalRateLimit': '5000'}
+    config['Security'] = {'RateLimit': '10', 'Blacklist': 'blocked_domains.txt', 'StealthMode': 'True', "ThreatUpdateInterval": "86400", 'AllowedNetworks': '', 'MaxResponseSize': '512', 'EnableAntiAmplification': 'True', 'EnableURLBlocking': 'False', 'AllowPrivateIPs': 'False', 'MaxRequestPerSecond': '500', 'GlobalRateLimit': '5000', 'ControlPanelConect': '5001'}
     config['AdBlocking'] = {'EnableAdBlocking': 'False', 'AdBlockLists': 'https://easylist.to/easylist/easylist.txt', 'UpdateInterval': '86400'}
     config['Logging'] = {'LogFile': 'dns_proxy.log'}
 
@@ -772,15 +779,6 @@ def bloquear_ip(ip):
         f.write(ip + "\n")
     log(f"[⛔ BLOQUEADO] IP {ip} detectada por posible DNS Tunneling", "WARNING")
     
-def get_client_location(ip):
-    try:
-        reader = geoip2.database.Reader('GeoLite2-City.mmdb')
-        response = reader.country(ip)
-        return response.country.iso_code
-    except Exception as e:
-        log(f"[❌ GEOIP] Error al obtener ubicación para {ip}: {e}", "ERROR")
-        return None
-    
 def is_ddos_attack(client_ip):
     now = time.time()
     CLIENT_REQUEST[client_ip] = [ts for ts in CLIENT_REQUEST[client_ip] if now - ts < 1]
@@ -1074,6 +1072,102 @@ def iniciar_stunnel():
     except Exception as e:
         log(f"Error al iniciar stunnel: {e}", "ERROR")
         return None
+
+# Servidor de control (socket TCP)
+def control_server():
+    global server, server_thread
+    
+    control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    control_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    try:
+        control_socket.bind(('0.0.0.0', CONTROL_PORT))
+        control_socket.listen(1)
+        log(f"🔧 Servidor de control escuchando en 0.0.0.0:{CONTROL_PORT}", "INFO")
+    except Exception as e:
+        log(f"[❌ CONTROL] Error al iniciar servidor de control: {e}", "ERROR")
+        return
+
+    while True:
+        try:
+            client, addr = control_socket.accept()
+            log(f"[🔧 CONTROL] Conexión desde {addr}", "INFO")
+            data = client.recv(1024).decode('utf-8')
+            log(f"[🔧 CONTROL] Comando recibido: {data}", "INFO")
+            
+            if data == "start":
+                if not server:
+                    threading.Thread(target=start_dns_server, daemon=True).start()
+                    response = "Servidor iniciado"
+                else:
+                    response = "Servidor ya está corriendo"
+            
+            elif data == "stop":
+                if server:
+                    server.shutdown()
+                    server.server_close()
+                    if server_thread:
+                        server_thread.join(timeout=2)
+                    server = None
+                    server_thread = None
+                    response = "Servidor detenido"
+                else:
+                    response = "Servidor ya está detenido"
+            
+            elif data == "stats":
+                status = "Corriendo" if server else "Detenido"
+                stats_data = {
+                    "status": status,
+                    "queries": sum(query_count.values()),
+                    "connected_ips": len(connected_ips),
+                    "success_count": success_count,
+                    "error_count": error_count,
+                    "blocked_domains_count": len(blocked_domains),
+                    "total_query_time": total_query_time,  # Añadido para avg_time
+                    "logs": logs[-10:],
+                    "ip": IP,
+                    "port": PORT
+                }
+                response = json.dumps(stats_data)
+            
+            elif data == "reload_config":
+                reload_config(None, None)
+                response = "Configuración recargada"
+            
+            elif data.startswith("blacklist_add:"):
+                domain = data.split(":", 1)[1]
+                if domain not in blocked_domains:
+                    blocked_domains.add(domain)
+                    with open(BLACKLIST_FILE, 'a') as f:
+                        f.write(f"{domain}\n")
+                    response = f"Dominio {domain} añadido"
+                else:
+                    response = "Dominio ya está en la lista"
+            
+            elif data.startswith("blacklist_remove:"):
+                domain = data.split(":", 1)[1]
+                if domain in blocked_domains:
+                    blocked_domains.remove(domain)
+                    with open(BLACKLIST_FILE, 'w') as f:
+                        f.writelines(f"{d}\n" for d in blocked_domains)
+                    response = f"Dominio {domain} eliminado"
+                else:
+                    response = "Dominio no encontrado"
+            
+            elif data == "get_blacklist":
+                response = json.dumps(list(blocked_domains))
+            
+            else:
+                response = "Comando desconocido"
+            
+            client.send(response.encode('utf-8'))
+        
+        except Exception as e:
+            log(f"[❌ CONTROL] Error en servidor de control: {e}", "ERROR")
+            client.send("Error interno".encode('utf-8'))
+        
+        finally:
+            client.close()
     
 def print_stats():
     avg_time = total_query_time / success_count if success_count else 0
@@ -1489,8 +1583,6 @@ if __name__ == "__main__":
             print(f"{COLOR['ERROR']}Para modificar la configuración DNS de Windows, se necesitan privilegios de administrador. Por favor, ejecute el script como administrador.{COLOR['RESET']}")
         log("Iniciando servidor DNS...", "INFO")
         
-        threading.Thread(target=update_threat_list, daemon=True).start()
-        
         if ENABLE_AD_BLOCKING:
             threading.Thread(target=update_adblock_list, daemon=True).start()
         
@@ -1520,6 +1612,9 @@ if __name__ == "__main__":
             log("No se pudo configurar el DNS de Windows. Continuando sin cambios.", "WARNING")
             
         start_dns_server()
+        
+        threading.Thread(target=control_server, daemon=True).start()  # Iniciar servidor de control
+        threading.Thread(target=update_threat_list, daemon=True).start()
 
         try:
             while flask_app_running:
