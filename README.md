@@ -74,6 +74,10 @@ pyinstaller --onefile --add-data "stunnel.conf" DoH.py
 
 * **Iniciar el servidor**: Ejecuta el script o el `.exe`. El proxy DNS escucha en `127.0.0.1:53` (configurable).
 
+* **Panel de control**: Ejecuta el panel de control(Actualmente es necesario ejecutar primero el servidor) `python ControlPanel.py` 
+
+![Captura de pantalla 2025-03-11 051648](https://github.com/user-attachments/assets/392e2403-2bc7-435d-bb95-8ee16e0507b1)
+
 * **Acceder a la interfaz web**: Abre `http://127.0.0.1:5000` en tu navegador (credenciales predeterminadas: `admin`/`secret`).
 
 ![Captura de pantalla 2025-02-24 210435](https://github.com/user-attachments/assets/cc73667c-1eed-4f45-956f-6818deecbcca)
@@ -119,6 +123,9 @@ maxresponsesize = 512
 enableantiamplification = True
 allowprivateips = False
 enableurlblocking = True
+MaxRequestPerSecond = 500
+GlobalRateLimit= 5000
+ControlPanelConect = 5001
 
 [AdBlocking]
 enableadblocking = True
@@ -191,6 +198,8 @@ TIMEOUTclose = 0
 * **stunnel**: Requiere configuración manual y un servidor remoto para máxima efectividad contra DPI.
 
 * **Empaquetado**: Incluye el archivo `stunnel.conf` para ofuscar el tráfico DNS.
+
+* **Idea del nuevo panel de control**: La idea del nuevo panel de control es poder gestionar todo el servidor desde el panel de control iniciarlo, pararlo, ejecutarlo, etc de una manera simple e interactiva. 
 
 # LICENCIA
 
